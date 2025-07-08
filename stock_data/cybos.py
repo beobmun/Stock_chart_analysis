@@ -1,5 +1,6 @@
 import win32com.client
 from enum import IntEnum
+import pandas as pd
 
 class CPE_MARKET_KIND(IntEnum):
     NULL = 0
@@ -22,4 +23,50 @@ class CPE_KOSPI200_KIND(IntEnum):
 class CpUtil:
     def __init__(self):
         self.CpCybos = win32com.client.Dispatch("CpUtil.CpCybos")
-        self.CpCodeMgr = win32com.client.Dispatch("CpUtil.CpCodeMgr")  
+        self.CpCodeMgr = win32com.client.Dispatch("CpUtil.CpCodeMgr")
+        
+    def check_server_type(self):
+        server_type = self.CpCybos.ServerType
+        
+        if server_type == 0:
+            print("연결 끊김")
+        elif server_type == 1:
+            print("cybos plus 서버 연결 완료")
+        elif server_type == 2:
+            print("HTS 보통서버 연결 완료")
+        else:
+            print("알 수 없음")
+    
+    def get_stock_list(self, CPE_MARKET_KIND):
+        return self.CpCodeMgr.GetStockListByMarket(CPE_MARKET_KIND)
+
+            
+class CpSysDib:
+    def __init__(self):
+        self.StockChart = win32com.client.Dispatch("CpSysDib.StockChart")
+        
+    def get_stock_data(self, code):
+        self.StockChart.SetInputValue(0, code) # 종목 선택
+        self.StockChart.SetInputValue(1, ord('1')) # '1': 기간으로 요청, '2': 개수로 요청
+        self.StockChart.SetInputValue(2, 20241231) # 요청 종료일
+        self.StockChart.SetInputValue(3, 20150101) # 요청 시작일
+        self.StockChart.SetInputValue(5, (0, 1, 2, 3, 4, 5, 8)) # 0:날짜, 1:시간, 2:시가, 3:고가, 4:저가, 5:종가, 8:거래량
+        self.StockChart.SetInputValue(6, ord('m')) # 차트 구분: 'm': 분
+        self.StockChart.SetInputValue(7, 5) # 주가
+        self.StockChart.SetInputValue(9, ord('1')) # '0': 무수정 주가, '1':수정주가
+        #self.StockChart.SetInputValue(10, ord('3'))
+        
+        self.StockChart.BlockRequest()
+        
+        num_data = self.StockChart.GetHeaderValue(3) # 3: 수신 개수
+        num_field = self.StockChart.GetHeaderValue(1) # 1: 필드 개수
+        name_field = self.StockChart.GetHeaderValue(2) # 2: 필드 이름
+        
+        df = pd.DataFrame()
+        for i in range(num_field):
+            temp = []
+            for j in range(num_data):
+                temp.append(self.StockChart.GetDataValue(i, j))
+            df[name_field[i]] = temp
+        
+        return df
