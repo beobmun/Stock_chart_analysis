@@ -21,6 +21,11 @@ class CPE_KOSPI200_KIND(IntEnum):
     CUSTOMER_STAPLES = 7
     CUSTOMER_DISCRETIONARY = 8
 
+class CPE_SUPERVISION_KIND(IntEnum):
+    CPC_STOCK_STATUS_NORMAL = 0
+    CPC_STOCK_STATUS_STOP = 1
+    CPC_STOCK_STATUS_BREAK = 2
+
 class CpUtil:
     def __init__(self):
         self.CpCybos = win32com.client.Dispatch("CpUtil.CpCybos")
@@ -41,6 +46,12 @@ class CpUtil:
     def get_stock_list(self, CPE_MARKET_KIND):
         return self.CpCodeMgr.GetStockListByMarket(CPE_MARKET_KIND)
 
+    def get_stock_info(self, code):
+        name = self.CpCodeMgr.CodeToName(code)
+        kospi200 = self.CpCodeMgr.GetStockKospi200Kind(code)
+        listed_date = self.CpCodeMgr.GetStockListedDate(code)
+        status = self.CpCodeMgr.GetStockStatusKind(code)
+        return (name, kospi200, listed_date, status)
 
 class CpSysDib:
     def __init__(self):
