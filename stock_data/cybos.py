@@ -41,7 +41,7 @@ class CpUtil:
     def get_stock_list(self, CPE_MARKET_KIND):
         return self.CpCodeMgr.GetStockListByMarket(CPE_MARKET_KIND)
 
-            
+
 class CpSysDib:
     def __init__(self):
         self.StockChart = win32com.client.Dispatch("CpSysDib.StockChart")
