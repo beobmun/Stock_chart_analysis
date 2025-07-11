@@ -11,15 +11,15 @@ class CPE_MARKET_KIND(IntEnum):
     KRX = 4
 
 class CPE_KOSPI200_KIND(IntEnum):
-    NONE = 0
-    CONSTRUCTIONS_MACHINERY = 1
-    SHIPBUILDING_TRANSPORTATION = 2
-    STEELS_METERIALS = 3
-    ENERGY_CHEMICALS = 4
-    IT = 5
-    FINANCE = 6
-    CUSTOMER_STAPLES = 7
-    CUSTOMER_DISCRETIONARY = 8
+    NONE = 0                            # Not in KOSPI200
+    CONSTRUCTIONS_MACHINERY = 1         # 건설기계
+    SHIPBUILDING_TRANSPORTATION = 2     # 조선운송
+    STEELS_METERIALS = 3                # 철강소재
+    ENERGY_CHEMICALS = 4                # 에너지화학
+    IT = 5                              # IT   
+    FINANCE = 6                         # 금융
+    CUSTOMER_STAPLES = 7                # 필수소비재
+    CUSTOMER_DISCRETIONARY = 8          # 자유소비재
 
 class CPE_SUPERVISION_KIND(IntEnum):
     CPC_STOCK_STATUS_NORMAL = 0
