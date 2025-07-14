@@ -78,7 +78,7 @@ class Dataset(torch.utils.data.Dataset):
         self.transform = transform
         
     def __len__(self):
-        return len(self.df)
+        return len(self.df) - self.candle_count + 1
     
     def _make_candle_chart(self, df, start):
         up_color = "#ed3738"
@@ -106,7 +106,7 @@ class Dataset(torch.utils.data.Dataset):
         # return candel_chart
     def __getitem__(self, idx):
         chart_img = self._make_candle_chart(self.df, idx)
-        
+        print(idx)
         if self.transform is not None:
             t = self.transform(chart_img)
             return t
