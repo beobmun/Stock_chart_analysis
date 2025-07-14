@@ -78,7 +78,7 @@ class Dataset(torch.utils.data.Dataset):
         self.transform = transform
         
     def __len__(self):
-        return len(self.df) - self.candle_count + 1
+        return len(self.df) - self.candle_count + 1 - 2
     
     def _make_candle_chart(self, df, start):
         up_color = "#ed3738"
@@ -105,14 +105,17 @@ class Dataset(torch.utils.data.Dataset):
         
         # return candel_chart
     def __getitem__(self, idx):
-        chart_img = self._make_candle_chart(self.df, idx)
-        print(idx)
-        if self.transform is not None:
-            t = self.transform(chart_img)
-            return t
-        t = transforms.ToTensor()(chart_img)
-        print(t.shape)
-        return t
+        chart_imgs = list()
+        for i in range(3):
+            chart_img = self._make_candle_chart(self.df, idx+i)
+            if self.transform is not None:
+                t = self.transform(chart_img)
+            else:
+                t = transforms.ToTensor()(chart_img)
+            chart_imgs.append(t)
+        chart_imgs = torch.stack(chart_imgs)
+        print(f"Chart images shape: {chart_imgs.shape}")
+        return chart_imgs
 
 
 # d = DataLoader('../get_data/data/info/kospi_info.csv', '../get_data/data/KOSPI')
