@@ -1,23 +1,24 @@
+import torch
 import numpy as np
 import random
 from collections import deque
 
 class Memory:
-    def __init__(self, buffer, width, height):
-        self.buffer = buffer
-        self.width = width
-        self.height = height
+    def __init__(self, buffer_size):
+        self.buffer = deque(maxlen=buffer_size)
         
-        self.current_state = deque(maxlen=buffer)
-        self.current_action = deque(maxlen=buffer)
-        self.current_reward = deque(maxlen=buffer)
-        self.next_state = deque(maxlen=buffer)
+    def __len__(self):
+        return len(self.buffer)
         
-    def add(self, current_state, current_action, current_reward, next_state):
-        self.current_state.append(current_state)
-        self.current_action.append(current_action)
-        self.current_reward.append(current_reward)
-        self.next_state.append(next_state)
+    def push(self, current_state, current_action, current_reward, next_state):
+        self.buffer.append((current_state, current_action, current_reward, next_state))
         
-    def get_batch(self, ):
-        pass
+    def get_random_sample(self, batch_size):
+        samples = random.sample(self.buffer, batch_size)
+        states, actions, rewards, next_states = zip(*samples)
+        return (
+            torch.stack(states),
+            torch.stack(actions),
+            torch.tensor(rewards, dtype=torch.float32),
+            torch.stack(next_states)
+        )
