@@ -36,7 +36,8 @@ class CNN(nn.Module):
         super().__init__()
         self.conv1 = ConvLayer(in_channels, 32, 64)
         self.conv2 = ConvLayer(64, 128, 256)
-        self.fc = FCLayer(256 * 5 * 5, num_actions)  # Assuming the output size after conv layers is 256x5x5
+        self.fc = FCLayer(256 * 5 * 5, num_actions)  # Assuming the output size after conv layers is 256x5x5 // 처음 input 사이즈에 따라 조정 필요
+        self.num_actions = num_actions
         
     def forward(self, x):
         x = self.conv1(x)
@@ -44,5 +45,5 @@ class CNN(nn.Module):
         x = x.view(x.size(0), -1)  # Flatten the tensor
         rho = self.fc(x)  # Output the action values
         _, max_indices = torch.max(rho, dim=1)
-        eta = F.one_hot(max_indices, num_classes=rho.size(1)).int().reshape(self.num_actions)  # Convert to one-hot encoding
+        eta = F.one_hot(max_indices, num_classes=self.num_actions).int()
         return rho, eta
