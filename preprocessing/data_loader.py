@@ -93,7 +93,6 @@ class Dataset(torch.utils.data.Dataset):
                                    facecolor='white',
                                    rc={'xtick.bottom': False, 'xtick.labelbottom': False,
                                        'ytick.left': False, 'ytick.labelleft': False,})
-        
         fig, _ = mpf.plot(df[start:start+self.candle_count], type='candle', style=style, volume=True, ylabel='', ylabel_lower='', returnfig=True)
         
         buf = BytesIO()
@@ -102,8 +101,11 @@ class Dataset(torch.utils.data.Dataset):
         plt.close(fig)
         
         return Image.open(buf).convert('RGB')
+
+    def _calc_yield(self, df, idx):
+        yield_rate = (df.iloc[idx+self.candle_count+1]['close'] - df.iloc[idx+self.candle_count]['close']) / df.iloc[idx+self.candle_count]['close'] * 100
+        return yield_rate
         
-        # return candel_chart
     def __getitem__(self, idx):
         chart_imgs = list()
         for i in range(3):
@@ -114,8 +116,8 @@ class Dataset(torch.utils.data.Dataset):
                 t = transforms.ToTensor()(chart_img)
             chart_imgs.append(t)
         chart_imgs = torch.stack(chart_imgs)
-        print(f"Chart images shape: {chart_imgs.shape}")
-        return chart_imgs
+        yield_rate = self._calc_yield(self.df, idx)
+        return chart_imgs, yield_rate
 
 
 # d = DataLoader('../get_data/data/info/kospi_info.csv', '../get_data/data/KOSPI')
