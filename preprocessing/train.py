@@ -106,16 +106,19 @@ class Train:
             print(f"Error getting random date data: {e}")
             return pd.DataFrame()
 
-    def _get_random_action(self, num_actions):
-        vec = torch.zeros(num_actions)
-        idx = random.randrange(0, num_actions)
-        vec[idx] = 1
-        return vec
+    def _get_random_action(self, num_actions, batch_size=1):
+        actions = []
+        for _ in range(batch_size):
+            vec = torch.zeros(num_actions)
+            idx = random.randrange(0, num_actions)
+            vec[idx] = 1
+            actions.append(vec)
+        return torch.stack(actions)
 
-    def _get_reward(self, pre_action, cur_action, y, panalty):
-        pre_act = 1 - torch.argmax(pre_action).item()
-        cur_act = 1 - torch.argmax(cur_action).item()
-        return (cur_act * y) - panalty * abs(cur_act - pre_act)
+    def _get_reward(self, pre_actions, cur_actions, y, panalty):
+        pre_acts = 1 - torch.argmax(pre_actions, dim=1)
+        cur_acts = 1 - torch.argmax(cur_actions, dim=1)
+        return (cur_acts * y) - panalty * torch.abs(cur_acts - pre_acts)
 
     def _update_target_model(self):
         try:
@@ -147,38 +150,36 @@ class Train:
                     
                     with tqdm(total=len(train_dataset), desc=f"Training {code}", ncols=100, leave=False) as pbar:
                         for imgs_batch, yield_batch in train_loader:   # batch_size만큼 imgs, yield가 반환됨.
-                            for imgs, y in zip(imgs_batch, yield_batch):
-                                pre_state = imgs[0].unsqueeze(0).to(device)
-                                cur_state = imgs[1].unsqueeze(0).to(device)
-                                next_state = imgs[2].unsqueeze(0).to(device)
+                            imgs_batch = imgs_batch.to(device)
+                            yield_batch = yield_batch.to(device)
+                            
+                            pre_states = imgs_batch[:, 0, :, :, :]  # pre_state
+                            cur_states = imgs_batch[:, 1, :, :, :]  # cur_state
+                            next_states = imgs_batch[:, 2, :, :, :]  # next_state
+                            
+                            if round(random.uniform(0, 1), 4) < epsilon:
+                                pre_actions = self._get_random_action(num_actions, batch_size).to(device)
+                                cur_actions = self._get_random_action(num_actions, batch_size).to(device)
                                 
-                                if round(random.uniform(0, 1), 4) < epsilon:
-                                    pre_action = self._get_random_action(num_actions)
-                                else:
-                                    with torch.no_grad():
-                                        r, pre_action = self.model(pre_state)
-                                        # print(f"pre_rho: {r}, pre_action: {pre_action}")
-                                        
-                                if round(random.uniform(0, 1), 4) < epsilon:
-                                    cur_action = self._get_random_action(num_actions)
-                                else:
-                                    with torch.no_grad():
-                                        r, cur_action = self.model(cur_state)
-                                        # print(f"cur_rho: {r}, cur_action: {cur_action}")
-                                        
-                                # print(f"pre_action: {pre_action}, cur_action: {cur_action}, yield: {y}")
-                                
-                                cur_reward = self._get_reward(pre_action, cur_action, y, transation_panalty)
-                                # print("y", y, "pre_idx: ", torch.argmax(pre_action).item(), "cur_idx: ", torch.argmax(cur_action).item(), "reward: ", cur_reward.item())
-                                
-                                self.memory.push(cur_state.squeeze(0), cur_action, cur_reward, next_state.squeeze(0))
-                                if epsilon > epsilon_min:
-                                    epsilon *= 0.999999
-                                
-                                pbar.update(1)
-                                pbar.refresh()
-                                # break
-                                # batch 끝
+                            else:
+                                with torch.no_grad():
+                                    _, pre_actions = self.model(pre_states)
+                                    _, cur_actions = self.model(cur_states)
+                            
+                            cur_rewards = self._get_reward(pre_actions, cur_actions, yield_batch, transation_panalty)
+                            for i in range(batch_size):
+                                self.memory.push(
+                                    cur_states[i].squeeze(0),
+                                    cur_actions[i].unsqueeze(0),
+                                    cur_rewards[i],
+                                    next_states[i].squeeze(0)
+                                )
+                            
+                            if epsilon > epsilon_min:
+                                epsilon *= 0.999999
+                            
+                            pbar.update(batch_size)
+                            
                         if len(self.memory) >= batch_size:
                             states, actions, rewards, next_states = self.memory.get_random_sample(batch_size)
                             states = states.to(device)
@@ -187,7 +188,6 @@ class Train:
                             next_states = next_states.to(device)
                             
                             q_values, _ = self.model(states)
-                            
                             q_values = torch.sum(q_values * actions, dim=1).max(dim=1)[0]
                             
                             with torch.no_grad():
