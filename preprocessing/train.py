@@ -1,9 +1,12 @@
 import random
 import pandas as pd
+import numpy as np
 import torch
+import torch.optim as optim
 import torchvision.transforms as transforms
 from data_loader import DataInfo, Dataset
 from memory import Memory
+from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Torch version:", torch.__version__)
@@ -21,6 +24,7 @@ class Train:
         self.data_info = None
         
         self.model = None
+        self.target_model = None
         self.memory = None
         
     def set_info_path(self, info_path):
@@ -34,14 +38,24 @@ class Train:
     def set_model(self, model):
         self.model = model
         return self
+    
+    def set_target_model(self, target_model):
+        self.target_model = target_model
+        try:
+            self.target_model.load_state_dict(self.model.state_dict())
+            self.target_model.eval()
+        except Exception as e:
+            print(f"Error setting target model: {e}")    
+        return self
 
     def set_memory(self, buffer_size):
         self.memory = Memory(buffer_size)
         return self
     
     def to(self, device):
-        if self.model is not None:
+        if self.model is not None and self.target_model is not None:
             self.model.to(device)
+            self.target_model.to(device)
         else:
             print("Model is not set. Please set the model before calling to().")
         return self
@@ -102,15 +116,28 @@ class Train:
         pre_act = 1 - torch.argmax(pre_action).item()
         cur_act = 1 - torch.argmax(cur_action).item()
         return (cur_act * y) - panalty * abs(cur_act - pre_act)
+
+    def _update_target_model(self):
+        try:
+            self.target_model.load_state_dict(self.model.state_dict())
+            self.target_model.eval()
+        except Exception as e:
+            print(f"Error updating target model: {e}")
     
-    def train(self, epsilon_init, epsilon_min, epochs, batch_size, learning_rate, transation_panalty):
+    def train(self, epsilon_init, epsilon_min, epochs, batch_size, learning_rate, transation_panalty, gamma):
         epsilon = epsilon_init
         num_actions = self.model.fc.fc_layer[-1].out_features
+        optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        criterion = torch.nn.MSELoss()
+        
+        total_loss = list()
         
         for epoch in range(epochs):
-            print(f"Epoch {epoch+1}/{epochs}")
-            for code in self.data_info.train_codes:
-                print(f"Processing code: {code}")
+            # print(f"Epoch {epoch+1}/{epochs}")
+            pbar_train_codes = tqdm(self.data_info.train_codes, desc=f"Epoch: {epoch+1}/{epochs}", ncols=100, leave=False)
+            for code in pbar_train_codes:
+                code_loss = list()
+                # print(f"Processing code: {code}")
                 try:
                     df = self._get_stock_data(code)
                     df_d = self._get_random_date_data(df) # 랜덤 날짜의 데이터
@@ -118,43 +145,71 @@ class Train:
                     train_dataset = Dataset(df_d, transform=transform)
                     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
                     
-                    for imgs_batch, yield_batch in train_loader:   # batch_size만큼 imgs, yield가 반환됨.
-                        for imgs, y in zip(imgs_batch, yield_batch):
-                            pre_state = imgs[0].unsqueeze(0).to(device)
-                            cur_state = imgs[1].unsqueeze(0).to(device)
-                            next_state = imgs[2].unsqueeze(0).to(device)
+                    with tqdm(total=len(train_dataset), desc=f"Training {code}", ncols=100, leave=False) as pbar:
+                        for imgs_batch, yield_batch in train_loader:   # batch_size만큼 imgs, yield가 반환됨.
+                            for imgs, y in zip(imgs_batch, yield_batch):
+                                pre_state = imgs[0].unsqueeze(0).to(device)
+                                cur_state = imgs[1].unsqueeze(0).to(device)
+                                next_state = imgs[2].unsqueeze(0).to(device)
+                                
+                                if round(random.uniform(0, 1), 4) < epsilon:
+                                    pre_action = self._get_random_action(num_actions)
+                                else:
+                                    with torch.no_grad():
+                                        r, pre_action = self.model(pre_state)
+                                        # print(f"pre_rho: {r}, pre_action: {pre_action}")
+                                        
+                                if round(random.uniform(0, 1), 4) < epsilon:
+                                    cur_action = self._get_random_action(num_actions)
+                                else:
+                                    with torch.no_grad():
+                                        r, cur_action = self.model(cur_state)
+                                        # print(f"cur_rho: {r}, cur_action: {cur_action}")
+                                        
+                                # print(f"pre_action: {pre_action}, cur_action: {cur_action}, yield: {y}")
+                                
+                                cur_reward = self._get_reward(pre_action, cur_action, y, transation_panalty)
+                                # print("y", y, "pre_idx: ", torch.argmax(pre_action).item(), "cur_idx: ", torch.argmax(cur_action).item(), "reward: ", cur_reward.item())
+                                
+                                self.memory.push(cur_state.squeeze(0), cur_action, cur_reward, next_state.squeeze(0))
+                                if epsilon > epsilon_min:
+                                    epsilon *= 0.999999
+                                
+                                pbar.update(1)
+                                pbar.refresh()
+                                # break
+                                # batch 끝
+                        if len(self.memory) >= batch_size:
+                            states, actions, rewards, next_states = self.memory.get_random_sample(batch_size)
+                            states = states.to(device)
+                            actions = actions.to(device)
+                            rewards = rewards.to(device)
+                            next_states = next_states.to(device)
                             
-                            if round(random.uniform(0, 1), 4) < epsilon:
-                                pre_action = self._get_random_action(num_actions)
-                            else:
-                                with torch.no_grad():
-                                    r, pre_action = self.model(pre_state)
-                                    print(f"pre_rho: {r}, pre_action: {pre_action}")
-                                    
-                            if round(random.uniform(0, 1), 4) < epsilon:
-                                cur_action = self._get_random_action(num_actions)
-                            else:
-                                with torch.no_grad():
-                                    r, cur_action = self.model(cur_state)
-                                    print(f"cur_rho: {r}, cur_action: {cur_action}")
-                                    
-                            # print(f"pre_action: {pre_action}, cur_action: {cur_action}, yield: {y}")
+                            q_values, _ = self.model(states)
                             
-                            cur_reward = self._get_reward(pre_action, cur_action, y, transation_panalty)
-                            print("y", y, "pre_idx: ", torch.argmax(pre_action).item(), "cur_idx: ", torch.argmax(cur_action).item(), "reward: ", cur_reward.item())
+                            q_values = torch.sum(q_values * actions, dim=1).max(dim=1)[0]
                             
-                            self.memory.push(cur_state.squeeze(0), cur_action, cur_reward, next_state.squeeze(0))
-                            # break
-                        states, actions, rewards, next_states = self.memory.get_random_sample(batch_size)
-                        states = states.to(device)
-                        actions = actions.to(device)
-                        rewards = rewards.to(device)
-                        next_states = next_states.to(device)
-                        
-                        print("states shape:", states.shape, "actions shape:", actions.shape, "rewards shape:", rewards.shape, "next_states shape:", next_states.shape)
-                        break
-                    break
+                            with torch.no_grad():
+                                next_q_values, _ = self.target_model(next_states)
+                                next_q_max = next_q_values.max(dim=1)[0]
+                                q_targets = rewards + gamma * next_q_max
+                            
+                            loss = criterion(q_values, q_targets)
+                            optimizer.zero_grad()
+                            loss.backward()
+                            optimizer.step()
+                            
+                            code_loss.append(loss.item())
+                            
+                            # print(f"Loss: {loss.item()}, Epsilon: {epsilon}")
+                            # print("states shape:", states.shape, "actions shape:", actions.shape, "rewards shape:", rewards.shape, "next_states shape:", next_states.shape)
+                        # break
+                    # break
+                    self._update_target_model()
+                    # print(f"Updated target model for code: {code}")
+                    total_loss.append(np.mean(code_loss))
                 except Exception as e:
                     print(f"Error processing data for {code}: {e}")
                     continue
-            break
+            print(f"Epoch {epoch+1}/{epochs} Loss: {total_loss[-1]}")
