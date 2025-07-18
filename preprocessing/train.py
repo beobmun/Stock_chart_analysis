@@ -7,11 +7,12 @@ import torch.optim as optim
 import torchvision.transforms as transforms
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from setproctitle import setproctitle
 
 from data_loader import DataInfo, Dataset
 from memory import Memory
 
-
+torch.backends.cudnn.benchmark = True  # Enable cudnn auto-tuner to find the best algorithm to use for your hardware
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Torch version:", torch.__version__)
 print("Using device:", device)
@@ -30,6 +31,8 @@ class Train:
         self.model = None
         self.target_model = None
         self.memory = None
+        self.stock_data_cache = dict()
+        self.num_workers = 0  # Set to 0 for CPU, or adjust based on your system
         
     def set_info_path(self, info_path):
         self.info_path = info_path
@@ -56,6 +59,10 @@ class Train:
         self.memory = Memory(buffer_size)
         return self
     
+    def set_num_workers(self, num_workers):
+        self.num_workers = num_workers
+        return self
+    
     def to(self, device):
         if self.model is not None and self.target_model is not None:
             self.model.to(device)
@@ -75,9 +82,11 @@ class Train:
         except Exception as e:
             print(f"Error loading data: {e}")
         return self
-    
+
     def _get_stock_data(self, code):
         try:
+            if code in self.stock_data_cache:
+                return self.stock_data_cache[code]
             df = pd.read_csv(f"{self.data_path}/{code}.csv")
             df = df.rename(columns={
                     "날짜": "date",
@@ -93,6 +102,8 @@ class Train:
             df = df[df['date'] >= pd.to_datetime('2020-07-01')]
             df['datetime'] = pd.to_datetime(df['date'].astype(str) + ' ' + df['time'].astype(str))
             df.set_index('datetime', inplace=True)
+            
+            self.stock_data_cache[code] = df
             return df
         except Exception as e:
             print(f"Error reading data for {code}: {e}")
@@ -138,8 +149,10 @@ class Train:
         f1 = f1_score(y_true, y_pred, average='weighted', zero_division=0)
         return (accuracy, precision, recall, f1)
 
-    def _save_results(self, model, train_loss, train_metrics, val_loss, val_metrics, results_dir="results"):
+    def _save_results(self, model, train_loss, train_metrics, val_loss, val_metrics, results_dir="results", epoch="final"):
         os.makedirs(results_dir, exist_ok=True)
+        models_dir = os.path.join(results_dir, "models")
+        os.makedirs(models_dir, exist_ok=True)
 
         train_df = pd.DataFrame({
             "loss": train_loss,
@@ -159,7 +172,7 @@ class Train:
         })
         val_df.to_csv(os.path.join(results_dir, "val_metrics.csv"), index=False)
 
-        torch.save(model.state_dict(), os.path.join(results_dir, "trained_model.pth"))
+        torch.save(model.state_dict(), os.path.join(models_dir, f"trained_model_{epoch}.pth"))
 
     def train(self, epsilon_init, epsilon_min, epochs, batch_size, learning_rate, transation_panalty, gamma):
         epsilon = epsilon_init
@@ -173,21 +186,21 @@ class Train:
         total_val_metrics = {"accuracy": [], "precision": [], "recall": [], "f1": []}
         
         for epoch in range(epochs):
+            setproctitle(f"Stock Epoch {epoch+1}/{epochs}")
             epoch_loss = list()
             
             self.model.train()
-            pbar_train_codes = tqdm(random.sample(self.data_info.train_codes, 30), desc=f"Epoch {epoch+1}/{epochs}", ncols=100, leave=False)
+            pbar_train_codes = tqdm(random.sample(self.data_info.train_codes, 50), desc=f"Epoch {epoch+1}/{epochs}", ncols=100, leave=False)
             y_true = list()
             y_pred = list()
             for code in pbar_train_codes:
                 code_loss = list()
-                # print(f"Processing code: {code}")
                 try:
                     df = self._get_stock_data(code)
                     df_d = self._get_random_date_data(df) # 랜덤 날짜의 데이터
                     
                     train_dataset = Dataset(df_d, transform=transform)
-                    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+                    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)
                     
                     with tqdm(total=len(train_dataset), desc=f"Training {code}", ncols=100, leave=False) as pbar:
                         for imgs_batch, yield_batch in train_loader:   # batch_size만큼 imgs, yield가 반환됨.
@@ -248,22 +261,18 @@ class Train:
                             z = torch.where(y_t == 0)
                             y_t = torch.where(y_t > 0, 1, -1)
                             y_t[z] = 0
-                            y_true += y_t
-                            y_pred += y_p
-                            # print(f"Loss: {loss.item()}, Epsilon: {epsilon}")
-                            # print("states shape:", states.shape, "actions shape:", actions.shape, "rewards shape:", rewards.shape, "next_states shape:", next_states.shape)
-                        # break
-                    # break
+                            y_true.append(y_t)
+                            y_pred.append(y_p)
+
                     self._update_target_model()
-                    # print(f"Updated target model for code: {code}")
                     epoch_loss.append(np.mean(code_loss))
                 except Exception as e:
                     print(f"(Train)Error processing data for {code}: {e}")
                     continue
                 
             total_train_loss.append(np.mean(epoch_loss))
-            y_pred = torch.tensor(y_pred)
-            y_true = torch.tensor(y_true)
+            y_pred = torch.cat(y_pred).to("cpu")
+            y_true = torch.cat(y_true).to("cpu")
             
             accuracy, precision, recall, f1 = self._get_metrics(y_true, y_pred)
             total_train_metrics["accuracy"].append(accuracy)
@@ -275,10 +284,11 @@ class Train:
             print(f"Epoch {epoch+1}/{epochs} Train Loss: {total_train_loss[-1]:.4f} \t\t| Accuracy: {accuracy:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} | F1 Score: {f1:.4f}")
             
             self.model.eval()
-            pbar_val_codes = tqdm(self.data_info.val_codes, desc=f"Validation {epoch+1}/{epochs}", ncols=100, leave=False)
+            pbar_val_codes = tqdm(random.sample(self.data_info.val_codes, 10), desc=f"Validation {epoch+1}/{epochs}", ncols=100, leave=False)
             y_true = list()
             y_pred = list()
             val_loss = list()
+            
             for code in pbar_val_codes:
                 code_loss = list()
                 try:
@@ -286,18 +296,18 @@ class Train:
                     df_d = self._get_random_date_data(df)  # 랜덤 날짜의 데이터
                     
                     val_dataset = Dataset(df_d, transform=transform)
-                    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+                    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)
                     
                     with tqdm(total=len(val_dataset), desc=f"Validating {code}", ncols=100, leave=False) as pbar:
-                        for imgs_batch, yield_batch in val_loader:
-                            imgs_batch = imgs_batch.to(device)
-                            yield_batch = yield_batch.to(device)
-                            
-                            pre_states = imgs_batch[:, 0, :, :, :]
-                            cur_states = imgs_batch[:, 1, :, :, :]
-                            next_states = imgs_batch[:, 2, :, :, :]
-                            
-                            with torch.no_grad():
+                        with torch.no_grad():
+                            for imgs_batch, yield_batch in val_loader:
+                                imgs_batch = imgs_batch.to(device)
+                                yield_batch = yield_batch.to(device)
+                                
+                                pre_states = imgs_batch[:, 0, :, :, :]
+                                cur_states = imgs_batch[:, 1, :, :, :]
+                                next_states = imgs_batch[:, 2, :, :, :]
+                                
                                 _, pre_actions = self.model(pre_states)
                                 q_values, cur_actions = self.model(cur_states)
                                 rewards = self._get_reward(pre_actions, cur_actions, yield_batch, 0)
@@ -305,26 +315,26 @@ class Train:
                                 q_values = torch.sum(q_values * cur_actions, dim=1).max(dim=1)[0]
                                 next_q_values, _ = self.target_model(next_states)
                                 next_q_max = next_q_values.max(dim=1)[0]
-                            
-                            
-                            q_targets = rewards + gamma * next_q_max
-                            loss = criterion(q_values, q_targets)
-                            code_loss.append(loss.item())
-                            
-                            y_p = 1 - cur_actions.squeeze(1).argmax(dim=1)
-                            z = torch.where(yield_batch == 0)
-                            y_t = torch.where(yield_batch > 0, 1, -1)
-                            y_t[z] = 0
-                            y_true += y_t
-                            y_pred += y_p
-                            
-                            pbar.update(batch_size)
+                                
+                                
+                                q_targets = rewards + gamma * next_q_max
+                                loss = criterion(q_values, q_targets)
+                                code_loss.append(loss.item())
+                                
+                                y_p = 1 - cur_actions.squeeze(1).argmax(dim=1)
+                                z = torch.where(yield_batch == 0)
+                                y_t = torch.where(yield_batch > 0, 1, -1)
+                                y_t[z] = 0
+                                y_true.append(y_t)
+                                y_pred.append(y_p)
+                                
+                                pbar.update(batch_size)
                     val_loss.append(np.mean(code_loss))
                 except Exception as e:
                     print(f"(Validation)Error reading data for {code}: {e}")
             
-            y_pred = torch.tensor(y_pred)
-            y_true = torch.tensor(y_true)
+            y_pred = torch.cat(y_pred).to("cpu")
+            y_true = torch.cat(y_true).to("cpu")
             
             accuracy, precision, recall, f1 = self._get_metrics(y_true, y_pred)
             total_val_loss.append(np.mean(val_loss))
@@ -335,8 +345,8 @@ class Train:
             
             print(f"Epoch {epoch+1}/{epochs} Validation Loss: {total_val_loss[-1]:.4f} \t| Accuracy: {accuracy:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} | F1 Score: {f1:.4f}")
             print("=" * 50)
-            if (epoch + 1) % 10 == 0:
-                torch.save(self.model.state_dict(), f"trained_model_epoch_{epoch+1}.pth")
+            if (epoch + 1) % 100 == 0:
+                self._save_results(self.model, total_train_loss, total_train_metrics, total_val_loss, total_val_metrics, epoch=epoch+1)
         print("Training complete.")
         
         self._save_results(self.model, total_train_loss, total_train_metrics, total_val_loss, total_val_metrics)

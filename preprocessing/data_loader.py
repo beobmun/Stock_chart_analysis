@@ -1,12 +1,12 @@
 import pandas as pd
+import numpy as np
 import torch
 import mplfinance as mpf
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageChops
 import torchvision.transforms as transforms
-
 class DataInfo:
     def __init__(self, info_path, data_path, random_state=42):
         self.info_path = info_path
@@ -80,6 +80,12 @@ class Dataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.df) - self.candle_count + 1 - 2
     
+    def _trim(self, img):
+        bg = Image.new(img.mode, img.size, (255, 255, 255))
+        diff = ImageChops.difference(img, bg)
+        bbox = diff.getbbox()
+        return img.crop(bbox) if bbox else img
+    
     def _make_candle_chart(self, df, start):
         up_color = "#ed3738"
         down_color = "#0d7df3"
@@ -93,14 +99,17 @@ class Dataset(torch.utils.data.Dataset):
                                    facecolor='white',
                                    rc={'xtick.bottom': False, 'xtick.labelbottom': False,
                                        'ytick.left': False, 'ytick.labelleft': False,})
-        fig, _ = mpf.plot(df[start:start+self.candle_count], type='candle', style=style, volume=True, ylabel='', ylabel_lower='', returnfig=True)
+        fig, _ = mpf.plot(df[start:start+self.candle_count], type='candle', style=style, volume=True, ylabel='', ylabel_lower='', returnfig=True, figsize=(2.24, 2.24))
+        canvas = FigureCanvas(fig)
+        canvas.draw()
         
         buf = BytesIO()
-        fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
+        # fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
+        fig.savefig(buf, format='png', pad_inches=0)
         buf.seek(0)
         plt.close(fig)
         
-        return Image.open(buf).convert('RGB')
+        return self._trim(Image.open(buf).convert('RGB'))
 
     def _calc_yield(self, df, idx):
         yield_rate = (df.iloc[idx+self.candle_count+1]['close'] - df.iloc[idx+self.candle_count]['close']) / df.iloc[idx+self.candle_count]['close'] * 100
@@ -118,7 +127,3 @@ class Dataset(torch.utils.data.Dataset):
         chart_imgs = torch.stack(chart_imgs)
         yield_rate = self._calc_yield(self.df, idx)
         return chart_imgs, yield_rate
-
-
-# d = DataLoader('../get_data/data/info/kospi_info.csv', '../get_data/data/KOSPI')
-# print(d.get_load_kospi200(listed_date='20200701'))
