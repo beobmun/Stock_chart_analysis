@@ -40,12 +40,12 @@ class DataInfo:
         self.kospi200_codes = self.kospi200_info_df['code'].tolist()
         return self
     
-    def train_test_split(self, train_size=0.6, val=True, kind=True):
+    def train_test_split(self, train_size=0.6, val=True, sector=True):
         if not self.kospi200_codes:
             print("Kospi200 codes are empty. Please load kospi200 info first.")
             return self
         
-        if kind:
+        if sector:
             self.train_codes = set(self.kospi200_info_df.groupby('kospi200').apply(
                 lambda x: x.sample(frac=train_size, random_state=self.random_state)
             )['code'].tolist())

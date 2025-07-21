@@ -76,7 +76,7 @@ class Train:
             self.data_info = (DataInfo(self.info_path, self.data_path)
                               .load_info()
                               .get_kospi200_info(listed_date='2020-07-01')
-                              .train_test_split(train_size=0.6, val=True, kind=True))
+                              .train_test_split(train_size=0.6, val=True, sector=True))
             print("Data loaded successfully.")
             print(f"cnt of train: {len(self.data_info.train_codes)}, val: {len(self.data_info.val_codes)}, test: {len(self.data_info.test_codes)}")
         except Exception as e:
