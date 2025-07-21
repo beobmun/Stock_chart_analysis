@@ -1,4 +1,5 @@
 */__pycache__/
 */WindowsPowerShell
 get_data/data/*
-preprocessing/results/*
+kospi200_5min/results/*
+*/sandbox.ipynb
