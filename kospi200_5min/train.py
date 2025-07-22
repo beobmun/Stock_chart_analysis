@@ -221,7 +221,7 @@ class Train:
                                     _, cur_actions = self.model(cur_states)
                             
                             cur_rewards = self._get_reward(pre_actions, cur_actions, yield_batch, transation_panalty)
-                            for i in range(batch_size):
+                            for i in range(imgs_batch.shape[0]):
                                 self.memory.push(
                                     cur_states[i].squeeze(0),
                                     cur_actions[i].unsqueeze(0),
@@ -231,11 +231,11 @@ class Train:
                                 )
                             
                             if epsilon > epsilon_min:
-                                epsilon *= 0.999999
+                                epsilon *= 0.99999
                             
                             pbar.update(batch_size)
                             
-                        if len(self.memory) >= batch_size:
+                        # if len(self.memory) >= batch_size:
                             states, actions, rewards, next_states, y_t = self.memory.get_random_sample(batch_size)
                             states = states.to(device)
                             actions = actions.to(device)
