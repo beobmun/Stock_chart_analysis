@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import random
 import torch
 import mplfinance as mpf
 import matplotlib.pyplot as plt
@@ -19,9 +20,12 @@ class DataInfo:
         self.val_symbols = list()
         self.test_symbpls = list()
         
-    def load_info(self):
+    def load_info(self, listed_date='2015-01-01'):
+        listed_date = pd.to_datetime(listed_date)
         try:
             self.snp500_info_df = pd.read_csv(self.info_path)
+            self.snp500_info_df.loc[:, 'Date added'] = pd.to_datetime(self.snp500_info_df['Date added'], format='%Y-%m-%d')
+            self.snp500_info_df = self.snp500_info_df.loc[self.snp500_info_df['Date added'] <= listed_date]
             self.snp500_symbols = self.snp500_info_df['Symbol'].tolist()
         except FileNotFoundError:
             print(f"File not found: {self.info_path}")
@@ -58,13 +62,16 @@ class DataInfo:
         return self
     
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, df, num_days=20, transform=None):
-        self.df = df
+    def __init__(self, df_cache, num_days=20, start_date=None, end_date=None, transform=None):
+        self.df_cache = df_cache
+        self.symbols = list(df_cache.keys())
         self.num_days = num_days
+        self.start_date = start_date
+        self.end_date = end_date
         self.transform = transform
         
     def __len__(self):
-        return len(self.df) - self.num_days + 1 - 2
+        return len(self.df_cache)
     
     def _trim(self, img):
         bg = Image.new(img.mode, img.size, (255, 255, 255))
@@ -95,21 +102,24 @@ class Dataset(torch.utils.data.Dataset):
         buf.seek(0)
         plt.close(fig)
         
-        return self._trim(Image.open(buf).convert('RGB'))
-    
+        if self.transform is not None:
+            return self.transform(self._trim(Image.open(buf).convert('RGB')))
+        else:
+            return transforms.ToTensor()(self._trim(Image.open(buf).convert('RGB')))
+
     def _calc_yield(self, df, idx):
-        yield_rate = (df.iloc[idx+self.num_days+1]['close'] - df.iloc[idx+self.num_days]['close']) / df.iloc[idx+self.num_days]['close'] * 100
+        yield_rate = (df.iloc[idx+self.num_days]['close'] - df.iloc[idx+self.num_days-1]['close']) / df.iloc[idx+self.num_days-1]['close'] * 100
         return yield_rate
     
     def __getitem__(self, idx):
         chart_imgs = list()
-        for i in range(3):
-            chart_img = self._generate_candle_chart(self.df, idx+i)
-            if self.transform is not None:
-                t = self.transform(chart_img)
-            else:
-                t = transforms.ToTensor()(chart_img)
-            chart_imgs.append(t)
+        filtered_df = self.df_cache[self.symbols[idx]].loc[self.start_date:self.end_date]
+        sample_idx = random.randint(1, len(filtered_df)-self.num_days - 2)
+        chart_imgs = [
+            self._generate_candle_chart(filtered_df, sample_idx - 1),
+            self._generate_candle_chart(filtered_df, sample_idx),
+            self._generate_candle_chart(filtered_df, sample_idx + 1)
+        ]
         chart_imgs = torch.stack(chart_imgs)
-        yield_rate = self._calc_yield(self.df, idx)
+        yield_rate = self._calc_yield(filtered_df, sample_idx)
         return chart_imgs, yield_rate
