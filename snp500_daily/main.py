@@ -1,4 +1,4 @@
-from train import Train
+from model import Model
 from cnn import CNN
 
 import torch
@@ -17,7 +17,7 @@ if __name__ == "__main__":
     setproctitle("Stock_S&P500")
     
     learning_rate = 1e-3
-    epsilon_init = 1
+    epsilon_init = 0.5
     epsilon_min = 0.1
     epochs = 10000
     batch_size = 16
@@ -32,7 +32,8 @@ if __name__ == "__main__":
     val_start_date = '2022-01-01'
     val_end_date = '2024-12-31'
     
-    model = (Train()
+    ### Training the model
+    model = (Model()
              .set_info_path(info_path)
              .set_data_path(data_path)
              .load_info()
@@ -45,3 +46,21 @@ if __name__ == "__main__":
             )
     
     model.train(epsilon_init, epsilon_min, epochs, batch_size, learning_rate, transaction_penalty, gamma, train_start_date, train_end_date, val_start_date, val_end_date)
+    
+    
+    ### Testing the model
+    '''
+    model_name = ""
+    test_model_state_path = f"results_sl/models/{model_name}.pth"
+    
+    model = (Model()
+             .set_info_path(info_path)
+             .set_data_path(data_path)
+             .load_info()
+             .set_df_cache()
+             .set_test_model(CNN(3, num_actions), test_model_state_path)
+             .to(device, test=True)
+             .set_num_workers(multiprocessing.cpu_count()//2)  # Set to 0 for CPU, or adjust based on your system
+             )
+    
+    '''

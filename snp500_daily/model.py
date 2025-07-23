@@ -23,7 +23,7 @@ transform = transforms.Compose([
     transforms.Resize((128, 128)),
     transforms.ToTensor(),])
 
-class Train:
+class Model:
     def __init__(self):
         self.info_path = None
         self.data_path = None
@@ -31,10 +31,12 @@ class Train:
         
         self.model = None
         self.target_model = None
+        self.test_model = None
         self.memory = None
         # self.stock_data_cache = dict()
         self.train_df_cache = dict()
         self.val_df_cache = dict()
+        self.test_df_cache = dict()
         self.num_workers = 0
         
     def set_info_path(self, info_path):
@@ -92,7 +94,22 @@ class Train:
             print(f"Error setting DataFrame cache: {e}")
         return self
         
-    def to(self, device):
+    def set_test_model(self, model, model_state_path=None):
+        try:
+            self.test_model = model
+            self.test_model.load_state_dict(torch.load(model_state_path))
+            self.test_model.eval()
+        except Exception as e:
+            print(f"Error setting test model: {e}")
+        return self
+        
+    def to(self, device, test=False):
+        if test:
+            if self.test_model is not None:
+                self.test_model.to(device)
+            else:
+                print("Test model is not set. Please set it before calling to().")
+            return self
         if self.model is not None and self.target_model is not None:
             self.model.to(device)
             self.target_model.to(device)
@@ -199,8 +216,8 @@ class Train:
 
         torch.save(model.state_dict(), os.path.join(model_dir, f"s&p500_model_epoch_{epoch}.pth"))
 
-    def _validate(self, dataset, batch_size, gamma, criterion, num_workers):
-        dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
+    def _validate(self, dataset, batch_size, gamma, criterion):
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True)
         self.model.eval()
         v_loss = list()
         y_true = list()
@@ -239,7 +256,6 @@ class Train:
         acc, prec, rec, f1 = self._get_metrics(y_true, y_pred)
         return np.mean(v_loss), (acc, prec, rec, f1)
 
-
     def train(self, epsilon_init, epsilon_min, epochs, batch_size, learning_rate, transaction_penalty, gamma, train_s, train_e, val_s, val_e):
         epsilon = epsilon_init
         num_actions = self.model.fc.fc_layer[-1].out_features
@@ -247,7 +263,7 @@ class Train:
         # criterion = torch.nn.MSELoss()
         # criterion = torch.nn.CrossEntropyLoss()
         criterion = torch.nn.SmoothL1Loss()
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.95 ** epoch)
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.9995 ** epoch)
         
         total_train_loss = list()
         total_train_metrics = {"accuracy": [], "precision": [], "recall": [], "f1": []}
@@ -317,7 +333,6 @@ class Train:
                         optimizer.zero_grad()
                         loss.backward()
                         optimizer.step()
-                        scheduler.step()
                         train_loss.append(loss.item())
                         
                         y_p = 1 - actions.squeeze(1).argmax(dim=1)
@@ -331,7 +346,8 @@ class Train:
                             epsilon *= 0.99999
                         
                         pbar.update(imgs_batch.shape[0])
-                
+
+                scheduler.step()
                 self._update_target_model()
                 total_train_loss.append(np.mean(train_loss))
                 y_pred = torch.cat(y_pred).to("cpu")
@@ -342,20 +358,25 @@ class Train:
                 total_train_metrics["recall"].append(rec)
                 total_train_metrics["f1"].append(f1)
                 
-                print(f"Epoch {epoch + 1}/{epochs}")
-                print(f"Train\tLoss: {total_train_loss[-1]:.4f} | Accuracy: {acc:.4f} | Precision: {prec:.4f} | Recall: {rec:.4f} | F1: {f1:.4f}")
+                print(f"Epoch {epoch + 1}/{epochs} | Epsilon: {epsilon:.4f} | Learning Rate: {scheduler.get_last_lr()[0]:.8f}")
+                print(f"Train\tLoss: {total_train_loss[-1]:.4f} | Accuracy: {acc:.4f} | Precision: {prec:.4f} | Recall: {rec:.4f} | f1: {f1:.4f}")
                 
             except Exception as e:
                 print(f"Error during training: {e}")
+                continue
+            if (epoch + 1) % 100:
                 continue
             try:
                 val_dataset_1 = Dataset(self.train_df_cache, start_date=val_s, end_date=val_e, transform=transform) # train data와 같은 종목의 학습 시기 이후 
                 val_dataset_2 = Dataset(self.val_df_cache, start_date=train_s, end_date=train_e, transform=transform) # train data와 다른 종목의 같은 시기
                 val_dataset_3 = Dataset(self.val_df_cache, start_date=val_s, end_date=val_e, transform=transform) # train data와 다른 종목의 학습 시기 이후
                 
-                val_loss_1, val_metrics_1 = self._validate(val_dataset_1, batch_size, gamma, criterion, self.num_workers)
-                val_loss_2, val_metrics_2 = self._validate(val_dataset_2, batch_size, gamma, criterion, self.num_workers)
-                val_loss_3, val_metrics_3 = self._validate(val_dataset_3, batch_size, gamma, criterion, self.num_workers)
+                val_loss_1, val_metrics_1 = self._validate(val_dataset_1, batch_size, gamma, criterion)
+                print(f"Valid_1\tLoss: {val_loss_1:.4f} | Accuracy: {val_metrics_1[0]:.4f} | Precision: {val_metrics_1[1]:.4f} | Recall: {val_metrics_1[2]:.4f} | f1: {val_metrics_1[3]:.4f}")
+                val_loss_2, val_metrics_2 = self._validate(val_dataset_2, batch_size, gamma, criterion)
+                print(f"Valid_2\tLoss: {val_loss_2:.4f} | Accuracy: {val_metrics_2[0]:.4f} | Precision: {val_metrics_2[1]:.4f} | Recall: {val_metrics_2[2]:.4f} | f1: {val_metrics_2[3]:.4f}")
+                val_loss_3, val_metrics_3 = self._validate(val_dataset_3, batch_size, gamma, criterion)
+                print(f"Valid_3\tLoss: {val_loss_3:.4f} | Accuracy: {val_metrics_3[0]:.4f} | Precision: {val_metrics_3[1]:.4f} | Recall: {val_metrics_3[2]:.4f} | f1: {val_metrics_3[3]:.4f}")
                 
                 total_val_loss_1.append(val_loss_1)
                 total_val_loss_2.append(val_loss_2)
@@ -373,18 +394,15 @@ class Train:
                 total_val_metrics_3["recall"].append(val_metrics_3[2])
                 total_val_metrics_3["f1"].append(val_metrics_3[3])
                 
-                print(f"Valid_1\tLoss: {val_loss_1:.4f} | Accuracy: {val_metrics_1[0]:.4f} | Precision: {val_metrics_1[1]:.4f} | Recall: {val_metrics_1[2]:.4f} | f1: {val_metrics_1[3]:.4f}")
-                print(f"Valid_2\tLoss: {val_loss_2:.4f} | Accuracy: {val_metrics_2[0]:.4f} | Precision: {val_metrics_2[1]:.4f} | Recall: {val_metrics_2[2]:.4f} | f1: {val_metrics_2[3]:.4f}")
-                print(f"Valid_3\tLoss: {val_loss_3:.4f} | Accuracy: {val_metrics_3[0]:.4f} | Precision: {val_metrics_3[1]:.4f} | Recall: {val_metrics_3[2]:.4f} | f1: {val_metrics_3[3]:.4f}")
                 print("=" * 100)
 
-                if (epoch+1) % 100 == 0:
-                    self._save_results(self.model, 
-                                       total_train_loss, total_train_metrics, 
-                                       total_val_loss_1, total_val_metrics_1, 
-                                       total_val_loss_2, total_val_metrics_2, 
-                                       total_val_loss_3, total_val_metrics_3, 
-                                       result_dir="results_sl", epoch=epoch+1)
+                # if (epoch+1) % 100 == 0:
+                self._save_results(self.model, 
+                                    total_train_loss, total_train_metrics, 
+                                    total_val_loss_1, total_val_metrics_1, 
+                                    total_val_loss_2, total_val_metrics_2, 
+                                    total_val_loss_3, total_val_metrics_3, 
+                                    result_dir="results_sl", epoch=epoch+1)
             except Exception as e:
                 print(f"Error during validation setup: {e}")
                 continue
@@ -395,3 +413,43 @@ class Train:
                            total_val_loss_2, total_val_metrics_2, 
                            total_val_loss_3, total_val_metrics_3, 
                            result_dir="results_sl", epoch="final")
+        
+    def test_distribution(self, start, end, batch_size, epochs, val_test: Literal['val', 'test'] = "val"):
+        if val_test == "val":
+            dataset = Dataset(self.val_df_cache, start_date=start, end_date=end, transform=transform)
+        elif val_test == "test":
+            dataset = Dataset(self.test_df_cache, start_date=start, end_date=end, transform=transform)
+
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)
+        
+        y_true = list()
+        y_yield = list()
+        y_pred = list()
+        q_values = list()
+        
+        for epoch in range(epochs):
+            with tqdm(total=len(dataset), desc=f"Testing {epoch+1}/{epochs}", ncols=100, leave=False) as pbar:
+                with torch.no_grad():
+                    for imgs_batch, yield_batch in dataloader:
+                        imgs_batch = imgs_batch.to(device)
+                        yield_batch = yield_batch.to(device)
+                        
+                        cur_states = imgs_batch[:, 1, :, :, :]
+                        q, cur_actions = self.test_model(cur_states)
+                        y_p = 1 - cur_actions.squeeze(1).argmax(dim=1)
+                        y_z = torch.where(yield_batch == 0)
+                        y_t = torch.where(yield_batch > 0, 1, -1)
+                        y_t[y_z] = 0
+                        y_true.append(y_t)
+                        y_yield.append(yield_batch)
+                        y_pred.append(y_p)
+                        q_values.append(q)
+                        pbar.update(imgs_batch.shape[0])
+                    
+        y_pred = torch.cat(y_pred).to("cpu")
+        y_true = torch.cat(y_true).to("cpu")
+        y_yield = torch.cat(y_yield).to("cpu")
+        q_values = torch.cat(q_values).to("cpu")
+        
+        print(f"Test Distribution | Accuracy: {accuracy_score(y_true, y_pred):.4f}" )
+        return y_pred, y_true, y_yield, q_values
