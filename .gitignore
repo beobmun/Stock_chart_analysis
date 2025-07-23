@@ -2,4 +2,5 @@
 */WindowsPowerShell
 get_data/data/*
 kospi200_5min/results/*
+snp500_daily/results*/*
 */sandbox.ipynb
