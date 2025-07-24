@@ -236,8 +236,7 @@ class Model:
                     _, pre_actions = self.model(pre_states)
                     q_values, cur_actions = self.model(cur_states)
                     rewards = self._get_reward(pre_actions, cur_actions, yield_batch, 0)
-                    cur_actions = cur_actions.unsqueeze(1)
-                    q_values = torch.sum(q_values * cur_actions, dim=1).max(dim=1)[0]
+                    q_values = torch.sum(q_values * cur_actions, dim=1)
                     next_q_values, _ = self.target_model(next_states)
                     next_q_max = next_q_values.max(dim=1)[0]
                     
@@ -317,25 +316,25 @@ class Model:
                             continue
                         states, actions, rewards, next_states, y_t = self.memory.get_random_sample(batch_size)
                         states = states.to(device)
-                        actions = actions.to(device)
+                        actions = actions.squeeze(1).to(device)
                         rewards = rewards.to(device)
                         next_states = next_states.to(device)
                         
                         q_values, _ = self.model(states)
-                        q_values = torch.sum(q_values * actions, dim=1).max(dim=1)[0]
-                                                
+                        q_values = torch.sum(q_values * actions, dim=1)
+                        
                         with torch.no_grad():
                             next_q_values, _ = self.target_model(next_states)
                             next_q_max = next_q_values.max(dim=1)[0]
                             q_targets = rewards + gamma * next_q_max
-                                                
+                        
                         loss = criterion(q_values, q_targets)
                         optimizer.zero_grad()
                         loss.backward()
                         optimizer.step()
                         train_loss.append(loss.item())
                         
-                        y_p = 1 - actions.squeeze(1).argmax(dim=1)
+                        y_p = 1 - actions.argmax(dim=1)
                         z = torch.where(y_t == 0)
                         y_t = torch.where(y_t > 0, 1, -1)
                         y_t[z] = 0
@@ -348,7 +347,6 @@ class Model:
                         pbar.update(imgs_batch.shape[0])
 
                 scheduler.step()
-                self._update_target_model()
                 total_train_loss.append(np.mean(train_loss))
                 y_pred = torch.cat(y_pred).to("cpu")
                 y_true = torch.cat(y_true).to("cpu")
@@ -358,6 +356,10 @@ class Model:
                 total_train_metrics["recall"].append(rec)
                 total_train_metrics["f1"].append(f1)
                 
+                if (epoch + 1) % 50 == 0:
+                    self._update_target_model()
+
+                print("=" * 100)
                 print(f"Epoch {epoch + 1}/{epochs} | Epsilon: {epsilon:.4f} | Learning Rate: {scheduler.get_last_lr()[0]:.8f}")
                 print(f"Train\tLoss: {total_train_loss[-1]:.4f} | Accuracy: {acc:.4f} | Precision: {prec:.4f} | Recall: {rec:.4f} | f1: {f1:.4f}")
                 
@@ -436,7 +438,7 @@ class Model:
                         
                         cur_states = imgs_batch[:, 1, :, :, :]
                         q, cur_actions = self.test_model(cur_states)
-                        y_p = 1 - cur_actions.squeeze(1).argmax(dim=1)
+                        y_p = 1 - cur_actions.argmax(dim=1)
                         y_z = torch.where(yield_batch == 0)
                         y_t = torch.where(yield_batch > 0, 1, -1)
                         y_t[y_z] = 0

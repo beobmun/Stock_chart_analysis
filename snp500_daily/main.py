@@ -16,16 +16,16 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if __name__ == "__main__":
     setproctitle("Stock_S&P500")
     
-    learning_rate = 1e-3
+    learning_rate = 1e-4
     epsilon_init = 0.5
     epsilon_min = 0.1
     epochs = 10000
-    batch_size = 16
+    batch_size = 32
     transaction_penalty = 0.05
     gamma = 0.99
     
     num_actions = 3
-    buffer_size = 1000
+    buffer_size = 100
     
     train_start_date = '2015-01-01'
     train_end_date = '2021-12-31'
