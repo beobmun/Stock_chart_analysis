@@ -20,7 +20,7 @@ print("Using device:", device)
 print("gpu count:", torch.cuda.device_count())
 
 transform = transforms.Compose([
-    transforms.Resize((128, 128)),
+    transforms.Resize((224, 224)),
     transforms.ToTensor(),])
 
 class Model:
@@ -255,9 +255,10 @@ class Model:
         acc, prec, rec, f1 = self._get_metrics(y_true, y_pred)
         return np.mean(v_loss), (acc, prec, rec, f1)
 
-    def train(self, epsilon_init, epsilon_min, epochs, batch_size, learning_rate, transaction_penalty, gamma, train_s, train_e, val_s, val_e):
+    def train(self, epsilon_init, epsilon_min, epochs, batch_size, learning_rate, transaction_penalty, gamma, train_s, train_e, val_s, val_e, save_dir="results"):
         epsilon = epsilon_init
-        num_actions = self.model.fc.fc_layer[-1].out_features
+        # num_actions = self.model.fc.fc_layer[-1].out_features
+        num_actions = self.model.num_actions
         optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
         # criterion = torch.nn.MSELoss()
         # criterion = torch.nn.CrossEntropyLoss()
@@ -301,7 +302,7 @@ class Model:
                             with torch.no_grad():
                                 _, pre_actions = self.model(pre_states)
                                 _, cur_actions = self.model(cur_states)
-                        
+
                         cur_rewards = self._get_reward(pre_actions, cur_actions, yield_batch, transaction_penalty)
                         for i in range(imgs_batch.shape[0]):
                             self.memory.push(
@@ -311,9 +312,13 @@ class Model:
                                 next_states[i].squeeze(0),
                                 yield_batch[i]
                             )
+                        if epsilon > epsilon_min:
+                            epsilon *= 0.99999
+
                         if len(self.memory) < batch_size:
                             pbar.update(imgs_batch.shape[0])
                             continue
+
                         states, actions, rewards, next_states, y_t = self.memory.get_random_sample(batch_size)
                         states = states.to(device)
                         actions = actions.squeeze(1).to(device)
@@ -322,12 +327,12 @@ class Model:
                         
                         q_values, _ = self.model(states)
                         q_values = torch.sum(q_values * actions, dim=1)
-                        
+
                         with torch.no_grad():
                             next_q_values, _ = self.target_model(next_states)
                             next_q_max = next_q_values.max(dim=1)[0]
                             q_targets = rewards + gamma * next_q_max
-                        
+
                         loss = criterion(q_values, q_targets)
                         optimizer.zero_grad()
                         loss.backward()
@@ -340,9 +345,6 @@ class Model:
                         y_t[z] = 0
                         y_true.append(y_t)
                         y_pred.append(y_p)
-                        
-                        if epsilon > epsilon_min:
-                            epsilon *= 0.99999
                         
                         pbar.update(imgs_batch.shape[0])
 
@@ -404,7 +406,7 @@ class Model:
                                     total_val_loss_1, total_val_metrics_1, 
                                     total_val_loss_2, total_val_metrics_2, 
                                     total_val_loss_3, total_val_metrics_3, 
-                                    result_dir="results_sl", epoch=epoch+1)
+                                    result_dir=save_dir, epoch=epoch+1)
             except Exception as e:
                 print(f"Error during validation setup: {e}")
                 continue
@@ -414,7 +416,7 @@ class Model:
                            total_val_loss_1, total_val_metrics_1, 
                            total_val_loss_2, total_val_metrics_2, 
                            total_val_loss_3, total_val_metrics_3, 
-                           result_dir="results_sl", epoch="final")
+                           result_dir=save_dir, epoch="final")
         
     def test_distribution(self, start, end, batch_size, epochs, val_test: Literal['val', 'test'] = "val"):
         if val_test == "val":
