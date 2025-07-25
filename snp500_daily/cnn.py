@@ -47,5 +47,5 @@ class CNN(nn.Module):
         x = x.view(x.size(0), -1)  # Flatten the tensor
         rho = self.fc(x)  # Output the action values
         _, max_indices = torch.max(rho, dim=1)
-        eta = F.one_hot(max_indices, num_classes=self.num_actions).int()
+        eta = F.one_hot(max_indices, num_classes=self.num_actions).float()
         return rho, eta
