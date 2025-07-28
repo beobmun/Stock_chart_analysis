@@ -161,6 +161,21 @@ class Model:
         cur_acts = 1 - torch.argmax(cur_actions, dim=1)
         return (cur_acts * y) - panalty * torch.abs(cur_acts - pre_acts)
     
+    def _get_reward_exp(self, pre_actions, cur_actions, y, panalty, scale=0.6, cap=5, linear_slope=None):
+        pre_acts = 1 - torch.argmax(pre_actions, dim=1)
+        cur_acts = 1 - torch.argmax(cur_actions, dim=1)
+        
+        correct_direction = torch.sign(y) == torch.sign(cur_acts)
+        scaled_rewards = torch.exp(scale * torch.clamp(torch.abs(y), max=cap))
+        if linear_slope is not None:
+            scaled_rewards = torch.where(torch.abs(y) <= cap,
+                                         torch.exp(scale * torch.abs(y)),
+                                         scaled_rewards + linear_slope * (torch.abs(y) - cap))
+        direction_rewards = torch.where(correct_direction, scaled_rewards, -scaled_rewards)
+        switching_penalty = panalty * torch.abs(cur_acts - pre_acts)
+        
+        return direction_rewards - switching_penalty
+    
     def _update_target_model(self):
         try:
             self.target_model.load_state_dict(self.model.state_dict())
@@ -263,7 +278,7 @@ class Model:
         # criterion = torch.nn.MSELoss()
         # criterion = torch.nn.CrossEntropyLoss()
         criterion = torch.nn.SmoothL1Loss()
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.9995 ** epoch)
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.9999 ** epoch)
         
         total_train_loss = list()
         total_train_metrics = {"accuracy": [], "precision": [], "recall": [], "f1": []}
@@ -303,7 +318,9 @@ class Model:
                                 _, pre_actions = self.model(pre_states)
                                 _, cur_actions = self.model(cur_states)
 
-                        cur_rewards = self._get_reward(pre_actions, cur_actions, yield_batch, transaction_penalty)
+                        # cur_rewards = self._get_reward(pre_actions, cur_actions, yield_batch, transaction_penalty)
+                        # cur_rewards = self._get_reward_exp(pre_actions, cur_actions, yield_batch, transaction_penalty)
+                        cur_rewards = self._get_reward_exp(pre_actions, cur_actions, yield_batch, transaction_penalty, scale=1.5, cap=2, linear_slope=1)
                         for i in range(imgs_batch.shape[0]):
                             self.memory.push(
                                 cur_states[i].squeeze(0),
@@ -348,7 +365,9 @@ class Model:
                         
                         pbar.update(imgs_batch.shape[0])
 
-                scheduler.step()
+                if scheduler.get_last_lr()[0] > 1e-6:
+                    scheduler.step()
+                
                 total_train_loss.append(np.mean(train_loss))
                 y_pred = torch.cat(y_pred).to("cpu")
                 y_true = torch.cat(y_true).to("cpu")
@@ -418,10 +437,12 @@ class Model:
                            total_val_loss_3, total_val_metrics_3, 
                            result_dir=save_dir, epoch="final")
         
-    def test_distribution(self, start, end, batch_size, epochs, val_test: Literal['val', 'test'] = "val"):
-        if val_test == "val":
+    def test_distribution(self, start, end, batch_size, epochs, dataset: Literal['train', 'val', 'test'] = "val"):
+        if dataset == "train":
+            dataset = Dataset(self.train_df_cache, start_date=start, end_date=end, transform=transform)
+        elif dataset == "val":
             dataset = Dataset(self.val_df_cache, start_date=start, end_date=end, transform=transform)
-        elif val_test == "test":
+        elif dataset == "test":
             dataset = Dataset(self.test_df_cache, start_date=start, end_date=end, transform=transform)
 
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)

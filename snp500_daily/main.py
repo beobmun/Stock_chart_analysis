@@ -21,19 +21,19 @@ if __name__ == "__main__":
     epsilon_init = 1.0
     epsilon_min = 0.1
     epochs = 30000
-    batch_size = 16
+    batch_size = 64
     transaction_penalty = 0.05
     gamma = 0.99
     
     num_actions = 3
-    buffer_size = 100
+    buffer_size = 10000
     
     train_start_date = '2015-01-01'
     train_end_date = '2021-12-31'
     val_start_date = '2022-01-01'
     val_end_date = '2024-12-31'
     # save_dir = "results_res50_pretrained"
-    save_dir = "results_res50_untrained"
+    save_dir = "results_res50_pretrained_exp3"
     
     ### Training the model
     # model = (Model()
@@ -52,8 +52,8 @@ if __name__ == "__main__":
             .set_data_path(data_path)
             .load_info()
             .set_df_cache()
-            .set_model(DQN_ResNet50(num_actions, pretrained=False))
-            .set_target_model(DQN_ResNet50(num_actions, pretrained=False))
+            .set_model(DQN_ResNet50(num_actions, pretrained=True))
+            .set_target_model(DQN_ResNet50(num_actions, pretrained=True))
             .to(device)
             .set_memory(buffer_size)
             .set_num_workers(multiprocessing.cpu_count()//2)  # Set to 0 for CPU, or adjust based on your system
