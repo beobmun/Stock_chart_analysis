@@ -21,19 +21,19 @@ if __name__ == "__main__":
     epsilon_init = 1.0
     epsilon_min = 0.1
     epochs = 30000
-    batch_size = 64
+    batch_size = 32
     transaction_penalty = 0.05
     gamma = 0.99
     
     num_actions = 3
-    buffer_size = 10000
+    buffer_size = 1000
     
     train_start_date = '2015-01-01'
     train_end_date = '2021-12-31'
     val_start_date = '2022-01-01'
     val_end_date = '2024-12-31'
     # save_dir = "results_res50_pretrained"
-    save_dir = "results_res50_pretrained_exp3"
+    save_dir = "results_res50_pretrained_exp_neut"
     
     ### Training the model
     # model = (Model()

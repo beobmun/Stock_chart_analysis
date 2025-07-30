@@ -7,7 +7,7 @@ import torch
 import torch.optim as optim
 import torchvision.transforms as transforms
 from tqdm import tqdm
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from setproctitle import setproctitle
 
 from data_loader import DataInfo, Dataset
@@ -161,16 +161,25 @@ class Model:
         cur_acts = 1 - torch.argmax(cur_actions, dim=1)
         return (cur_acts * y) - panalty * torch.abs(cur_acts - pre_acts)
     
-    def _get_reward_exp(self, pre_actions, cur_actions, y, panalty, scale=0.6, cap=5, linear_slope=None):
+    def _get_reward_exp(self, pre_actions, cur_actions, y, panalty, scale=0.6, cap=5, linear_slope=None, neutral=None):
         pre_acts = 1 - torch.argmax(pre_actions, dim=1)
         cur_acts = 1 - torch.argmax(cur_actions, dim=1)
         
-        correct_direction = torch.sign(y) == torch.sign(cur_acts)
+        if neutral is not None:
+            sign_y = torch.where(torch.abs(y) < neutral, 0, torch.sign(y))
+            correct_direction = sign_y == torch.sign(cur_acts)
+        else:
+            correct_direction = torch.sign(y) == torch.sign(cur_acts)
         scaled_rewards = torch.exp(scale * torch.clamp(torch.abs(y), max=cap))
         if linear_slope is not None:
             scaled_rewards = torch.where(torch.abs(y) <= cap,
                                          torch.exp(scale * torch.abs(y)),
                                          scaled_rewards + linear_slope * (torch.abs(y) - cap))
+        if neutral is not None:
+            scaled_rewards = torch.where(torch.abs(y) < neutral,
+                                        torch.exp(scale * cap) - torch.exp(scale * cap) * torch.abs(y),
+                                        scaled_rewards)
+
         direction_rewards = torch.where(correct_direction, scaled_rewards, -scaled_rewards)
         switching_penalty = panalty * torch.abs(cur_acts - pre_acts)
         
@@ -238,6 +247,12 @@ class Model:
         y_true = list()
         y_pred = list()
         
+        # define the reward scaling parameters
+        scale = 0.6
+        cap = torch.tensor(2.0).to(device)
+        linear_slope = torch.tensor(0.1).to(device)
+        neutral = torch.tensor(0.5).to(device)
+        
         with tqdm(total=len(dataset), desc="Validation", ncols=100, leave=False) as pbar:
             with torch.no_grad():
                 for imgs_batch, yield_batch in dataloader:
@@ -250,7 +265,8 @@ class Model:
                     
                     _, pre_actions = self.model(pre_states)
                     q_values, cur_actions = self.model(cur_states)
-                    rewards = self._get_reward(pre_actions, cur_actions, yield_batch, 0)
+                    # rewards = self._get_reward_exp(pre_actions, cur_actions, yield_batch, 0, scale=1.5, cap=2, linear_slope=1)
+                    rewards = self._get_reward_exp(pre_actions, cur_actions, yield_batch, 0, scale=scale, cap=cap, linear_slope=linear_slope, neutral=neutral)
                     q_values = torch.sum(q_values * cur_actions, dim=1)
                     next_q_values, _ = self.target_model(next_states)
                     next_q_max = next_q_values.max(dim=1)[0]
@@ -289,6 +305,12 @@ class Model:
         total_val_loss_3 = list()
         total_val_metrics_3 = {"accuracy": [], "precision": [], "recall": [], "f1": []}
         
+        # Define the reward scaling parameters
+        scale = 0.6
+        cap = torch.tensor(2.0).to(device)
+        linear_slope = torch.tensor(0.1).to(device)
+        neutral = torch.tensor(0.5).to(device)
+        
         for epoch in range(epochs):
             setproctitle(f"S&P500 Epoch {epoch + 1}/{epochs}, Epsilon: {epsilon:.4f}")
             
@@ -320,7 +342,9 @@ class Model:
 
                         # cur_rewards = self._get_reward(pre_actions, cur_actions, yield_batch, transaction_penalty)
                         # cur_rewards = self._get_reward_exp(pre_actions, cur_actions, yield_batch, transaction_penalty)
-                        cur_rewards = self._get_reward_exp(pre_actions, cur_actions, yield_batch, transaction_penalty, scale=1.5, cap=2, linear_slope=1)
+                        # cur_rewards = self._get_reward_exp(pre_actions, cur_actions, yield_batch, transaction_penalty, scale=1.5, cap=2, linear_slope=1)
+                        cur_rewards = self._get_reward_exp(pre_actions, cur_actions, yield_batch, transaction_penalty, scale=scale, cap=cap, linear_slope=linear_slope, neutral=neutral)
+
                         for i in range(imgs_batch.shape[0]):
                             self.memory.push(
                                 cur_states[i].squeeze(0),
@@ -341,6 +365,7 @@ class Model:
                         actions = actions.squeeze(1).to(device)
                         rewards = rewards.to(device)
                         next_states = next_states.to(device)
+                        y_t = y_t.to(device)
                         
                         q_values, _ = self.model(states)
                         q_values = torch.sum(q_values * actions, dim=1)
@@ -357,7 +382,10 @@ class Model:
                         train_loss.append(loss.item())
                         
                         y_p = 1 - actions.argmax(dim=1)
-                        z = torch.where(y_t == 0)
+                        if neutral is not None:
+                            z = torch.where(torch.abs(y_t) < neutral)
+                        else:
+                            z = torch.where(y_t == 0)
                         y_t = torch.where(y_t > 0, 1, -1)
                         y_t[z] = 0
                         y_true.append(y_t)
@@ -377,12 +405,16 @@ class Model:
                 total_train_metrics["recall"].append(rec)
                 total_train_metrics["f1"].append(f1)
                 
-                if (epoch + 1) % 50 == 0:
+                if (epoch + 1) % 10 == 0:
                     self._update_target_model()
 
                 print("=" * 100)
                 print(f"Epoch {epoch + 1}/{epochs} | Epsilon: {epsilon:.4f} | Learning Rate: {scheduler.get_last_lr()[0]:.8f}")
                 print(f"Train\tLoss: {total_train_loss[-1]:.4f} | Accuracy: {acc:.4f} | Precision: {prec:.4f} | Recall: {rec:.4f} | f1: {f1:.4f}")
+                # Compare y_true and y_pred and print the confusion matrix
+                cm = confusion_matrix(y_true, y_pred)
+                print("Confusion Matrix:")
+                print(cm)
                 
             except Exception as e:
                 print(f"Error during training: {e}")
@@ -437,7 +469,7 @@ class Model:
                            total_val_loss_3, total_val_metrics_3, 
                            result_dir=save_dir, epoch="final")
         
-    def test_distribution(self, start, end, batch_size, epochs, dataset: Literal['train', 'val', 'test'] = "val"):
+    def test_distribution(self, start, end, batch_size, epochs, dataset: Literal['train', 'val', 'test'] = "val", neutral=None):
         if dataset == "train":
             dataset = Dataset(self.train_df_cache, start_date=start, end_date=end, transform=transform)
         elif dataset == "val":
@@ -462,7 +494,10 @@ class Model:
                         cur_states = imgs_batch[:, 1, :, :, :]
                         q, cur_actions = self.test_model(cur_states)
                         y_p = 1 - cur_actions.argmax(dim=1)
-                        y_z = torch.where(yield_batch == 0)
+                        if neutral is not None:
+                            y_z = torch.where(torch.abs(yield_batch) < neutral)
+                        else:
+                            y_z = torch.where(yield_batch == 0)
                         y_t = torch.where(yield_batch > 0, 1, -1)
                         y_t[y_z] = 0
                         y_true.append(y_t)
