@@ -8,6 +8,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from io import BytesIO
 from PIL import Image, ImageChops
 import torchvision.transforms as transforms
+from tqdm import tqdm
 
 class DataInfo:
     def __init__(self, info_path, data_path, random_state=42):
@@ -112,7 +113,6 @@ class Dataset(torch.utils.data.Dataset):
         return yield_rate
     
     def __getitem__(self, idx):
-        chart_imgs = list()
         filtered_df = self.df_cache[self.symbols[idx]].loc[self.start_date:self.end_date]
         sample_idx = random.randint(1, len(filtered_df)-self.num_days - 2)
         chart_imgs = [
@@ -122,4 +122,78 @@ class Dataset(torch.utils.data.Dataset):
         ]
         chart_imgs = torch.stack(chart_imgs)
         yield_rate = self._calc_yield(filtered_df, sample_idx)
+        return chart_imgs, yield_rate
+    
+class Dataset2(torch.utils.data.Dataset):
+    def __init__(self, df_cache, num_days=20, start_date=None, end_date=None, data_dir="", transform=None):
+        # self.df_cache = df_cache
+        # self.symbols = list(df_cache.keys())
+        self.num_days = num_days
+        self.start_date = start_date
+        self.end_date = end_date
+        self.data_dir = data_dir
+        self.transform = transform
+        
+        self.samples = list()
+        with tqdm(total=len(df_cache), desc="Preparing dataset samples", ncols=100, leave=False) as pbar:
+            for symbol, df in df_cache.items():
+                s = symbol.lower().replace(".", "-")
+                df = df.loc[start_date:end_date]
+                dates = df.index[num_days-1:]
+                
+                for i in range(1, len(dates)-1):
+                    try:
+                        pre_date = dates[i-1]
+                        cur_date = dates[i]
+                        next_date = dates[i+1]
+                        
+                        yield_rate = (df.loc[next_date]['close'] - df.loc[cur_date]['close']) / df.loc[cur_date]['close'] * 100
+                        
+                        self.samples.append({
+                            'symbol': s,
+                            'dates': [str(pre_date).split(' ')[0], str(cur_date).split(' ')[0], str(next_date).split(' ')[0]],
+                            'yield': yield_rate
+                        })
+                    except Exception as e:
+                        print(f"Error processing {symbol} on dates {dates[i-1]}, {dates[i]}, {dates[i+1]}: {e}")
+                        continue
+                pbar.update(1)
+            
+        
+    def __len__(self):
+        return len(self.samples)
+
+    # def _calc_yield(self, df, cur_date, next_date):
+    #     yield_rate = (df.loc[next_date]['close'] - df.loc[cur_date]['close']) / df.loc[cur_date]['close'] * 100
+    #     return yield_rate
+
+    def __getitem__(self, idx):
+        '''
+        symbol = self.symbols[idx]
+        filtered_df = self.df_cache[symbol].loc[self.start_date:self.end_date][self.num_days-1:]
+        dates = np.array([str(i).split(' ')[0] for i in filtered_df.index])
+        symbol = symbol.lower().replace(".", "-")
+        total_imgs = list()
+        total_yields = list()
+        for i in range(1, len(filtered_df)-1):
+            chart_imgs = [
+                Image.open(f"{self.data_dir}/{self.num_days}/{symbol}/{dates[i-1]}.png"),
+                Image.open(f"{self.data_dir}/{self.num_days}/{symbol}/{dates[i]}.png"),
+                Image.open(f"{self.data_dir}/{self.num_days}/{symbol}/{dates[i+1]}.png")
+            ]
+            chart_imgs = [self.transform(img) for img in chart_imgs]
+            chart_imgs = torch.stack(chart_imgs)
+            total_imgs.append(chart_imgs)
+            yield_rate = self._calc_yield(filtered_df, dates[i], dates[i+1])
+            total_yields.append(yield_rate)
+        total_imgs = torch.stack(total_imgs)
+        total_yields = torch.tensor(total_yields, dtype=torch.float32)
+        return (total_imgs, total_yields)
+        '''
+        sample = self.samples[idx]
+        symbol, dates, yield_rate = sample['symbol'], sample['dates'], sample['yield']
+        chart_imgs = [Image.open(f"{self.data_dir}/{self.num_days}/{symbol}/{d}.png").convert('RGB') for d in dates]
+        if self.transform is not None:
+            chart_imgs = [self.transform(img) for img in chart_imgs]
+        chart_imgs = torch.stack(chart_imgs)
         return chart_imgs, yield_rate
