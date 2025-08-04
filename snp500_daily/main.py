@@ -14,11 +14,12 @@ import multiprocessing
 matplotlib.use('Agg')  # Use a non-interactive backend for matplotlib
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 def main(rank, world_size):
-    setup_ddp(rank, world_size)
-    
+    if world_size > 1:
+        setup_ddp(rank, world_size)
+
     setproctitle(f"Stock_S&P500_rank {rank}")
     
     learning_rate = 1e-4
@@ -40,7 +41,7 @@ def main(rank, world_size):
     info_path = '../get_data/data/info/snp500_info.csv'
     data_path = '../get_data/data/US/time_series'
     imgs_dir = '../get_data/data/US/chart_image'
-    save_dir = "results_res50_pretrained_all"
+    save_dir = "results_res50_pretrained_all_AdamW"
     
     ### Training the model
     '''

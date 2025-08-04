@@ -16,7 +16,7 @@ from memory import Memory
 from ddp import setup_ddp, cleanup_ddp
 
 torch.backends.cudnn.benchmark = True
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 # print("Torch version:", torch.__version__)
 # print("Using device:", device)
 # print("gpu count:", torch.cuda.device_count())
@@ -354,7 +354,8 @@ class Model:
         epsilon = epsilon_init
         # num_actions = self.model.fc.fc_layer[-1].out_features
         num_actions = self.model.num_actions
-        optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        # optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        optimizer = optim.AdamW(self.model.parameters(), lr=learning_rate, weight_decay=1e-2)
         # criterion = torch.nn.MSELoss()
         # criterion = torch.nn.CrossEntropyLoss()
         criterion = torch.nn.SmoothL1Loss()
@@ -376,7 +377,7 @@ class Model:
         neutral = torch.tensor(0.5).to(device)
         
         train_dataset = Dataset2(self.train_df_cache, start_date=train_s, end_date=train_e, data_dir=imgs_dir, transform=transform)
-        train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True)
+        train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)
         
         val_dataset_1 = Dataset2(self.train_df_cache, start_date=val_s, end_date=val_e, data_dir=imgs_dir, transform=transform) # train data와 같은 종목의 학습 시기 이후
         val_dataset_2 = Dataset2(self.val_df_cache, start_date=train_s, end_date=train_e, data_dir=imgs_dir, transform=transform) # train data와 다른 종목의 같은 시기
@@ -424,7 +425,7 @@ class Model:
                                 yield_batch[i]
                             )
                         if epsilon > epsilon_min:
-                            epsilon *= 0.99999
+                            epsilon *= 0.999999
 
                         if len(self.memory) < batch_size:
                             pbar.update(imgs_batch.shape[0])
@@ -518,7 +519,7 @@ class Model:
                 
                 print("=" * 100)
 
-                if (epoch+1) % 100 == 0:
+                if (epoch+1) % 50 == 0:
                     self._save_results(self.model, 
                                         total_train_loss, total_train_metrics, 
                                         total_val_loss_1, total_val_metrics_1, 

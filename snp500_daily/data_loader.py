@@ -163,33 +163,7 @@ class Dataset2(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.samples)
 
-    # def _calc_yield(self, df, cur_date, next_date):
-    #     yield_rate = (df.loc[next_date]['close'] - df.loc[cur_date]['close']) / df.loc[cur_date]['close'] * 100
-    #     return yield_rate
-
     def __getitem__(self, idx):
-        '''
-        symbol = self.symbols[idx]
-        filtered_df = self.df_cache[symbol].loc[self.start_date:self.end_date][self.num_days-1:]
-        dates = np.array([str(i).split(' ')[0] for i in filtered_df.index])
-        symbol = symbol.lower().replace(".", "-")
-        total_imgs = list()
-        total_yields = list()
-        for i in range(1, len(filtered_df)-1):
-            chart_imgs = [
-                Image.open(f"{self.data_dir}/{self.num_days}/{symbol}/{dates[i-1]}.png"),
-                Image.open(f"{self.data_dir}/{self.num_days}/{symbol}/{dates[i]}.png"),
-                Image.open(f"{self.data_dir}/{self.num_days}/{symbol}/{dates[i+1]}.png")
-            ]
-            chart_imgs = [self.transform(img) for img in chart_imgs]
-            chart_imgs = torch.stack(chart_imgs)
-            total_imgs.append(chart_imgs)
-            yield_rate = self._calc_yield(filtered_df, dates[i], dates[i+1])
-            total_yields.append(yield_rate)
-        total_imgs = torch.stack(total_imgs)
-        total_yields = torch.tensor(total_yields, dtype=torch.float32)
-        return (total_imgs, total_yields)
-        '''
         sample = self.samples[idx]
         symbol, dates, yield_rate = sample['symbol'], sample['dates'], sample['yield']
         chart_imgs = [Image.open(f"{self.data_dir}/{self.num_days}/{symbol}/{d}.png").convert('RGB') for d in dates]
