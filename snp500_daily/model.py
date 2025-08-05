@@ -16,7 +16,7 @@ from memory import Memory
 from ddp import setup_ddp, cleanup_ddp
 
 torch.backends.cudnn.benchmark = True
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 # print("Torch version:", torch.__version__)
 # print("Using device:", device)
 # print("gpu count:", torch.cuda.device_count())
@@ -350,10 +350,85 @@ class Model:
         acc, prec, rec, f1 = self._get_metrics(y_true, y_pred)
         return np.mean(v_loss), (acc, prec, rec, f1)
 
-    def train(self, epsilon_init, epsilon_min, epochs, batch_size, learning_rate, transaction_penalty, gamma, train_s, train_e, val_s, val_e, imgs_dir="", save_dir="results"):
+    def _train(self, dataset, dataloader, year, optimizer, criterion, epoch, epochs, epsilon, epsilon_min, num_actions, batch_size, transaction_penalty, gamma, scale, cap, neutral, device):
+        self.model.train()
+        train_loss = list()
+        y_true = list()
+        y_pred = list()
+                
+        with tqdm(total=len(dataset.samples), desc=f"Training Epoch {epoch+1}/{epochs} - {year}", ncols=100, leave=False) as pbar:
+            for i, (imgs_batch, yield_batch) in enumerate(dataloader):
+                imgs_batch = imgs_batch.to(device)
+                yield_batch = yield_batch.to(device)
+                
+                pre_states = imgs_batch[:, 0, :, :, :]
+                cur_states = imgs_batch[:, 1, :, :, :]
+                next_states = imgs_batch[:, 2, :, :, :]
+                
+                if round(random.uniform(0, 1), 4) < epsilon:
+                    pre_actions = self._get_random_action(num_actions, imgs_batch.shape[0]).to(device)
+                    cur_actions = self._get_random_action(num_actions, imgs_batch.shape[0]).to(device)
+                else:
+                    with torch.no_grad():
+                        _, pre_actions = self.model(pre_states)
+                        _, cur_actions = self.model(cur_states)
+                
+                cur_rewards = self._get_reward_neutral(pre_actions, cur_actions, yield_batch, transaction_penalty, scale=scale, cap=cap, neutral=neutral)
+                for i in range(imgs_batch.shape[0]):
+                    self.memory.push(
+                        cur_states[i].squeeze(0),
+                        cur_actions[i].unsqueeze(0),
+                        cur_rewards[i],
+                        next_states[i].squeeze(0),
+                        yield_batch[i]
+                    )
+                if epsilon > epsilon_min:
+                    epsilon *= 0.999999
+                
+                if len(self.memory) < batch_size:
+                    pbar.update(imgs_batch.shape[0])
+                    continue
+                
+                if i % 10 == 0:
+                    self._update_target_model()
+                
+                states, actions, rewards, next_states, y_t = self.memory.get_random_sample(batch_size)
+                states = states.to(device)
+                actions = actions.squeeze(1).to(device)
+                rewards = rewards.to(device)
+                next_states = next_states.to(device)
+                y_t = y_t.to(device)
+                
+                q_values, _ = self.model(states)
+                q_values = torch.sum(q_values * actions, dim=1)
+                
+                with torch.no_grad():
+                    next_q_values, _ = self.target_model(next_states)
+                    next_q_max = next_q_values.max(dim=1)[0]
+                    q_targets = rewards + gamma * next_q_max
+                
+                loss = criterion(q_values, q_targets)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                train_loss.append(loss.item())
+                
+                y_p = 1 - actions.argmax(dim=1)
+                if neutral is not None:
+                    z = torch.where(torch.abs(y_t) < neutral)
+                else:
+                    z = torch.where(y_t == 0)
+                y_t = torch.where(y_t > 0, 1, -1)
+                y_t[z] = 0
+                y_true.append(y_t)
+                y_pred.append(y_p)
+                
+                pbar.update(imgs_batch.shape[0])
+                
+        return  np.mean(train_loss), y_true, y_pred, epsilon
+
+    def train(self, epsilon_init, epsilon_min, num_actions, epochs, batch_size, learning_rate, transaction_penalty, gamma, train_s, train_e, val_s, val_e, imgs_dir="", save_dir="results"):
         epsilon = epsilon_init
-        # num_actions = self.model.fc.fc_layer[-1].out_features
-        num_actions = self.model.num_actions
         # optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
         optimizer = optim.AdamW(self.model.parameters(), lr=learning_rate, weight_decay=1e-2)
         # criterion = torch.nn.MSELoss()
@@ -376,8 +451,11 @@ class Model:
         linear_slope = torch.tensor(0.1).to(device)
         neutral = torch.tensor(0.5).to(device)
         
-        train_dataset = Dataset2(self.train_df_cache, start_date=train_s, end_date=train_e, data_dir=imgs_dir, transform=transform)
-        train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)
+        # train_dataset = Dataset2(self.train_df_cache, start_date=train_s, end_date=train_e, data_dir=imgs_dir, transform=transform)
+        # train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)
+        years = range(int(train_s.split("-")[0]), int(train_e.split("-")[0]) + 1)
+        train_dataset = {year: Dataset2(self.train_df_cache, start_date=f"{year}-01-01", end_date=f"{year}-12-31", data_dir=imgs_dir, transform=transform) for year in years}
+        train_dataloader = {year: torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True) for year, dataset in train_dataset.items()}
         
         val_dataset_1 = Dataset2(self.train_df_cache, start_date=val_s, end_date=val_e, data_dir=imgs_dir, transform=transform) # train data와 같은 종목의 학습 시기 이후
         val_dataset_2 = Dataset2(self.val_df_cache, start_date=train_s, end_date=train_e, data_dir=imgs_dir, transform=transform) # train data와 다른 종목의 같은 시기
@@ -388,6 +466,16 @@ class Model:
             setproctitle(f"S&P500 Epoch {epoch + 1}/{epochs}, Epsilon: {epsilon:.4f}")
             
             try:
+                # train_loss, y_true, y_pred, epsilon = self._train(train_dataset, train_dataloader, optimizer, criterion, epoch, epochs, epsilon, epsilon_min, num_actions, batch_size, transaction_penalty, gamma, scale, cap, neutral, device)
+                train_loss = list()
+                y_true = list()
+                y_pred = list()
+                for year in years:
+                    t_loss, y_t, y_p, epsilon = self._train(train_dataset[year], train_dataloader[year], year, optimizer, criterion, epoch, epochs, epsilon, epsilon_min, num_actions, batch_size, transaction_penalty, gamma, scale, cap, neutral, device)
+                    train_loss.append(t_loss)
+                    y_true.extend(y_t)
+                    y_pred.extend(y_p)
+                '''
                 self.model.train()
                 train_loss = list()
                 y_true = list()
@@ -466,10 +554,11 @@ class Model:
                         y_pred.append(y_p)
 
                         pbar.update(imgs_batch.shape[0])
-
+                '''
                 if scheduler.get_last_lr()[0] > 1e-6:
                     scheduler.step()
                 
+                # total_train_loss.append(np.mean(train_loss))
                 total_train_loss.append(np.mean(train_loss))
                 y_pred = torch.cat(y_pred).to("cpu")
                 y_true = torch.cat(y_true).to("cpu")
@@ -574,6 +663,8 @@ class Model:
             train_sampler.set_epoch(epoch)  # Set the epoch for the sampler to ensure shuffling is consistent across epochs
 
             try:
+                train_loss, y_true, y_pred, epsilon = self._train(train_dataset, train_dataloader, optimizer, criterion, epoch, epochs, epsilon, epsilon_min, num_actions, batch_size, transaction_penalty, gamma, scale, cap, neutral, self.rank)
+                '''
                 self.model.train()
                 train_loss = list()
                 y_true = list()
@@ -648,12 +739,13 @@ class Model:
                         y_pred.append(y_p)
 
                         pbar.update(imgs_batch.shape[0])
-
+                '''
                 if scheduler.get_last_lr()[0] > 1e-6:
                     scheduler.step()
                 
                 if self.rank == 0:
-                    total_train_loss.append(np.mean(train_loss))
+                    # total_train_loss.append(np.mean(train_loss))
+                    total_train_loss.append(train_loss)
                     y_pred = torch.cat(y_pred).to("cpu")
                     y_true = torch.cat(y_true).to("cpu")
                     acc, prec, rec, f1 = self._get_metrics(y_true, y_pred)
