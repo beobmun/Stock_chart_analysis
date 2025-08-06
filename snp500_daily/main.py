@@ -1,6 +1,7 @@
 from model import Model
 from cnn import CNN
 from dqn_resnet50 import DQN_ResNet50
+from dqn_internimage import DQN_InternImage
 from ddp import setup_ddp, cleanup_ddp
 
 import torch
@@ -14,7 +15,8 @@ import multiprocessing
 matplotlib.use('Agg')  # Use a non-interactive backend for matplotlib
 
 
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# single GPU 사용할 경우, 현재 파일의 device와 model.py의 device를 동일하게 설정
 
 def main(rank, world_size):
     if world_size > 1:
@@ -26,7 +28,7 @@ def main(rank, world_size):
     epsilon_init = 1.0
     epsilon_min = 0.1
     epochs = 10000
-    batch_size = 512
+    batch_size = 256
     transaction_penalty = 0.05
     gamma = 0.99
     
@@ -41,7 +43,9 @@ def main(rank, world_size):
     info_path = '../get_data/data/info/snp500_info.csv'
     data_path = '../get_data/data/US/time_series'
     imgs_dir = '../get_data/data/US/chart_image'
-    save_dir = "results_res50_pretrained_all_seq"
+    # save_dir = "results_res50_pretrained_all_seq"
+    save_dir = "results_internimage_l_22kto1k_384"
+
     
     ### Training the model
     
@@ -85,8 +89,10 @@ def main(rank, world_size):
             .set_data_path(data_path)
             .load_info()
             .set_df_cache()
-            .set_model(DQN_ResNet50(num_actions, pretrained=True))
-            .set_target_model(DQN_ResNet50(num_actions, pretrained=True))
+            # .set_model(DQN_ResNet50(num_actions, pretrained=True))
+            # .set_target_model(DQN_ResNet50(num_actions, pretrained=True))
+            .set_model(DQN_InternImage(num_actions, model_path="./models/internimage_l_22kto1k_384"))
+            .set_target_model(DQN_InternImage(num_actions, model_path="./models/internimage_l_22kto1k_384"))
             .to(device)
             .set_memory(buffer_size)
             .set_num_workers(multiprocessing.cpu_count()//4)  # Set to 0 for CPU, or adjust based on your system
@@ -98,8 +104,6 @@ def main(rank, world_size):
         train_start_date, train_end_date, val_start_date, val_end_date, 
         imgs_dir, save_dir
         )
-    # model.train2(epsilon_init, epsilon_min, epochs, batch_size, learning_rate, transaction_penalty, gamma, \
-    #     train_start_date, train_end_date, val_start_date, val_end_date, imgs_dir, save_dir)
     # '''
     
     ### Testing the model
@@ -129,5 +133,6 @@ if __name__ == "__main__":
         cleanup_ddp()
         print("Training interrupted. DDP cleaned up.")
     # '''
+    
     # Single GPU training setup
     main(rank=0, world_size=1)

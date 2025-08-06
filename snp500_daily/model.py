@@ -16,7 +16,7 @@ from memory import Memory
 from ddp import setup_ddp, cleanup_ddp
 
 torch.backends.cudnn.benchmark = True
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # print("Torch version:", torch.__version__)
 # print("Using device:", device)
 # print("gpu count:", torch.cuda.device_count())
