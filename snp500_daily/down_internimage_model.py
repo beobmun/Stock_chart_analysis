@@ -11,4 +11,4 @@ def download_internimage_model(model_name="internimage_g_22kto1k_512"):
     else:
         print(f"Directory {download_dir} already exists. Skipping download.")
 
-download_internimage_model("internimage_l_22kto1k_384")
+download_internimage_model("internimage_t_1k_224")

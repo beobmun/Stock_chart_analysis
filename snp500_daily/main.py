@@ -44,7 +44,7 @@ def main(rank, world_size):
     data_path = '../get_data/data/US/time_series'
     imgs_dir = '../get_data/data/US/chart_image'
     # save_dir = "results_res50_pretrained_all_seq"
-    save_dir = "results_internimage_l_22kto1k_384"
+    save_dir = "results_internimage_t_1k_224"
 
     
     ### Training the model
@@ -87,12 +87,12 @@ def main(rank, world_size):
     model = (Model()
             .set_info_path(info_path)
             .set_data_path(data_path)
-            .load_info()
+            .load_info(listed_date=train_start_date)
             .set_df_cache()
             # .set_model(DQN_ResNet50(num_actions, pretrained=True))
             # .set_target_model(DQN_ResNet50(num_actions, pretrained=True))
-            .set_model(DQN_InternImage(num_actions, model_path="./models/internimage_l_22kto1k_384"))
-            .set_target_model(DQN_InternImage(num_actions, model_path="./models/internimage_l_22kto1k_384"))
+            .set_model(DQN_InternImage(num_actions, model_path="./models/internimage_t_1k_224"))
+            .set_target_model(DQN_InternImage(num_actions, model_path="./models/internimage_t_1k_224"))
             .to(device)
             .set_memory(buffer_size)
             .set_num_workers(multiprocessing.cpu_count()//4)  # Set to 0 for CPU, or adjust based on your system

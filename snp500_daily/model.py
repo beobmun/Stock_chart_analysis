@@ -126,10 +126,10 @@ class Model:
         self.world_size = world_size
         return self
 
-    def load_info(self):
+    def load_info(self, listed_date='2015-01-01'):
         try:
             self.data_info = (DataInfo(self.info_path, self.data_path)
-                              .load_info()
+                              .load_info(listed_date)
                               .train_test_split(train_size=0.6, val=True, sector=True))
         except Exception as e:
             print(f"Error loading info: {e}")
