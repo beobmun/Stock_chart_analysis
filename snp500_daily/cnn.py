@@ -36,8 +36,8 @@ class CNN(nn.Module):
         super().__init__()
         self.conv1 = ConvLayer(in_channels, 32, 64)
         self.conv2 = ConvLayer(64, 128, 256)
-        # self.fc = FCLayer(256 * 53 * 53, num_actions)  # 224 x 224 input
-        self.fc = FCLayer(256 * 29 * 29, num_actions) # 128 x 128 input
+        self.fc = FCLayer(256 * 53 * 53, num_actions)  # 224 x 224 input
+        # self.fc = FCLayer(256 * 29 * 29, num_actions) # 128 x 128 input
         # self.fc = FCLayer(256 * 13 * 13, num_actions) # 64 x 64 input
         self.num_actions = num_actions
         

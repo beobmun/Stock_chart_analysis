@@ -92,7 +92,10 @@ class Dataset(torch.utils.data.Dataset):
                                    marketcolors=marketcolor,
                                    facecolor='white',
                                    rc={'xtick.bottom': False, 'xtick.labelbottom': False,
-                                       'ytick.left': False, 'ytick.labelleft': False,})
+                                       'ytick.left': False, 'ytick.labelleft': False,
+                                       'axes.spines.top': False, 'axes.spines.right': False,
+                                       'axes.spines.left': False, 'axes.spines.bottom': False,
+                                       'axes.grid': False})
         fig, _ = mpf.plot(df[start:start+self.num_days], type='candle', style=style, volume=True, ylabel='', ylabel_lower='', returnfig=True, figsize=(2.24, 2.24), volume_exponent=0)
         canvas = FigureCanvas(fig)
         canvas.draw()
