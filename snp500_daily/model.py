@@ -720,7 +720,7 @@ class Model:
         y_pred = list()
         q_values = list()
                 
-        with tqdm(total=len(dataset.samples), desc=f"Testing", ncols=100, leave=False) as pbar:
+        with tqdm(total=len(dataloader.dataset), desc=f"Testing", ncols=100, leave=False) as pbar:
             with torch.no_grad():
                 for imgs_batch, yield_batch in dataloader:
                     imgs_batch = imgs_batch.to(self.device)
@@ -739,10 +739,10 @@ class Model:
                     y_yield.append(yield_batch.cpu())
                     y_pred.append(y_p.cpu())
                     q_values.append(q.cpu())
+                                        
+                    pbar.update(imgs_batch.shape[0])
                     
                     del imgs_batch, yield_batch, cur_states, q, cur_actions, y_p, y_t
-                    
-                    pbar.update(imgs_batch.shape[0])
 
         y_pred = torch.cat(y_pred)
         y_true = torch.cat(y_true)

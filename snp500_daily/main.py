@@ -35,7 +35,7 @@ def main(rank=0, world_size=1, gpu_ids=[0]):
     epsilon_init = 1.0
     epsilon_min = 0.1
     epochs = 10000
-    batch_size = 512
+    batch_size = 256
     transaction_penalty = 0.05
     gamma = 0.99
     
