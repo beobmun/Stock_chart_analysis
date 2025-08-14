@@ -441,10 +441,26 @@ class Model:
                 del a
                 
                 with torch.no_grad():
+                    # DQN
+                    '''
                     next_q_values, a = self.target_model(next_states)
                     next_q_max = next_q_values.max(dim=1)[0]
                     q_targets = rewards + gamma * next_q_max
                     del a
+                    # '''
+                    
+                    # DDQN
+                    # '''
+                    next_q_values_main, a = self.model(next_states)
+                    best_next_actions = next_q_values_main.argmax(dim=1, keepdim=True)
+                    del next_q_values_main, a
+                    
+                    next_q_values_target, a = self.target_model(next_states)
+                    next_q_max = next_q_values_target.gather(1, best_next_actions).squeeze(1)
+                    q_targets = rewards + gamma * next_q_max
+                    del next_q_values_target, a
+                    # '''
+                    
                 loss = criterion(q_values, q_targets)
                 optimizer.zero_grad()
                 loss.backward()
@@ -462,8 +478,12 @@ class Model:
                 y_true.append(y_t_cpu)
                 y_pred.append(y_p_cpu)
 
-                del states, actions, rewards, next_states, q_values_all, q_values, next_q_values, next_q_max, q_targets, loss, y_p
+                # DQN
+                # del states, actions, rewards, next_states, q_values_all, q_values, next_q_values, next_q_max, q_targets, loss, y_p
                 
+                # DDQN
+                del states, actions, rewards, next_states, q_values_all, q_values, next_q_max, q_targets, loss, y_p
+
                 if self.counter >= 25000:
                     self._update_target_model()
                     self.counter = 0
