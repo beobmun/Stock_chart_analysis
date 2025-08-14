@@ -1,5 +1,6 @@
 from model import Model
 from cnn import CNN
+from jiang_cnn import JiangCNN
 from dqn_resnet50 import DQN_ResNet50
 from dqn_internimage import DQN_InternImage
 from dqn_efficientnet import DQN_EfficientNet
@@ -35,7 +36,7 @@ def main(rank=0, world_size=1, gpu_ids=[0]):
     epsilon_init = 1.0
     epsilon_min = 0.1
     epochs = 10000
-    batch_size = 512
+    batch_size = 64
     transaction_penalty = 0.05
     gamma = 0.99
     
@@ -103,8 +104,10 @@ def main(rank=0, world_size=1, gpu_ids=[0]):
             .set_data_path(data_path)
             .load_info(listed_date=train_start_date)
             .set_df_cache()
-            .set_model(CNN(3, num_actions))  
-            .set_target_model(CNN(3, num_actions))
+            # .set_model(CNN(3, num_actions))  
+            # .set_target_model(CNN(3, num_actions))
+            .set_model(JiangCNN(3, num_actions))
+            .set_target_model(JiangCNN(3, num_actions))
             # .set_model(DQN_ResNet50(num_actions, pretrained=True))
             # .set_target_model(DQN_ResNet50(num_actions, pretrained=True))
             # .set_model(DQN_InternImage(num_actions, model_path="./models/internimage_t_1k_224"))
@@ -166,4 +169,4 @@ if __name__ == "__main__":
     # '''
     
     # Single GPU training setup
-    main(rank=0)
+    main(rank=2)
