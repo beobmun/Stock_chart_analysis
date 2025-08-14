@@ -111,10 +111,10 @@ class Dataset(torch.utils.data.Dataset):
         else:
             return transforms.ToTensor()(self._trim(Image.open(buf).convert('RGB')))
 
-    def _calc_yield(self, df, idx):
-        yield_rate = (df.iloc[idx+self.num_days]['close'] - df.iloc[idx+self.num_days-1]['close']) / df.iloc[idx+self.num_days-1]['close'] * 100
-        return yield_rate
-    
+    def _calc_return(self, df, idx):
+        return_rate = (df.iloc[idx+self.num_days]['close'] - df.iloc[idx+self.num_days-1]['close']) / df.iloc[idx+self.num_days-1]['close'] * 100
+        return return_rate
+
     def __getitem__(self, idx):
         filtered_df = self.df_cache[self.symbols[idx]].loc[self.start_date:self.end_date]
         sample_idx = random.randint(1, len(filtered_df)-self.num_days - 2)
@@ -124,9 +124,9 @@ class Dataset(torch.utils.data.Dataset):
             self._generate_candle_chart(filtered_df, sample_idx + 1)
         ]
         chart_imgs = torch.stack(chart_imgs)
-        yield_rate = self._calc_yield(filtered_df, sample_idx)
-        return chart_imgs, yield_rate
-    
+        return_rate = self._calc_return(filtered_df, sample_idx)
+        return chart_imgs, return_rate
+
 class Dataset2(torch.utils.data.Dataset):
     def __init__(self, df_cache, num_days=20, start_date=None, end_date=None, data_dir="", transform=None):
         # self.df_cache = df_cache
@@ -150,12 +150,12 @@ class Dataset2(torch.utils.data.Dataset):
                         cur_date = dates[i]
                         next_date = dates[i+1]
                         
-                        yield_rate = (df.loc[next_date]['close'] - df.loc[cur_date]['close']) / df.loc[cur_date]['close'] * 100
+                        return_rate = (df.loc[next_date]['close'] - df.loc[cur_date]['close']) / df.loc[cur_date]['close'] * 100
                         
                         self.samples.append({
                             'symbol': s,
                             'dates': [str(pre_date).split(' ')[0], str(cur_date).split(' ')[0], str(next_date).split(' ')[0]],
-                            'yield': yield_rate
+                            'return': return_rate
                         })
                     except Exception as e:
                         print(f"Error processing {symbol} on dates {dates[i-1]}, {dates[i]}, {dates[i+1]}: {e}")
@@ -168,9 +168,9 @@ class Dataset2(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         sample = self.samples[idx]
-        symbol, dates, yield_rate = sample['symbol'], sample['dates'], sample['yield']
+        symbol, dates, return_rate = sample['symbol'], sample['dates'], sample['return']
         chart_imgs = [Image.open(f"{self.data_dir}/{self.num_days}/{symbol}/{d}.png").convert('RGB') for d in dates]
         if self.transform is not None:
             chart_imgs = [self.transform(img) for img in chart_imgs]
         chart_imgs = torch.stack(chart_imgs)
-        return chart_imgs, yield_rate
+        return chart_imgs, return_rate

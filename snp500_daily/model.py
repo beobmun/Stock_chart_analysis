@@ -330,11 +330,11 @@ class Model:
         
         with tqdm(total=len(dataset.samples), desc="Validation", ncols=100, leave=False) as pbar:
             with torch.no_grad():
-                for imgs_batch, yield_batch in dataloader:
+                for imgs_batch, return_batch in dataloader:
                     
                     # imgs_batch = imgs_batch.to(device)
-                    # yield_batch = yield_batch.to(device)
-                    
+                    # return_batch = return_batch.to(device)
+
                     pre_states_cpu = imgs_batch[:, 0, :, :, :]
                     cur_states_cpu = imgs_batch[:, 1, :, :, :]
                     next_states_cpu = imgs_batch[:, 2, :, :, :]
@@ -349,9 +349,9 @@ class Model:
                     cur_actions_cpu = cur_actions.to("cpu")
                     del cur_states_gpu
                     
-                    # rewards = self._get_reward_exp(pre_actions, cur_actions, yield_batch, 0, scale=1.5, cap=2, linear_slope=1)
-                    # rewards = self._get_reward_exp(pre_actions, cur_actions, yield_batch, 0, scale=scale, cap=cap, linear_slope=linear_slope, neutral=neutral)
-                    rewards = self._get_reward_neutral(pre_actions_cpu, cur_actions_cpu, yield_batch, 0, scale=scale, cap=cap, neutral=neutral)
+                    # rewards = self._get_reward_exp(pre_actions, cur_actions, return_batch, 0, scale=1.5, cap=2, linear_slope=1)
+                    # rewards = self._get_reward_exp(pre_actions, cur_actions, return_batch, 0, scale=scale, cap=cap, linear_slope=linear_slope, neutral=neutral)
+                    rewards = self._get_reward_neutral(pre_actions_cpu, cur_actions_cpu, return_batch, 0, scale=scale, cap=cap, neutral=neutral)
                     rewards = rewards.to(device)
                     q_values = torch.sum(q_values_all * cur_actions, dim=1)
                     next_states_gpu = next_states_cpu.to(device)
@@ -365,10 +365,10 @@ class Model:
                     y_p = 1 - cur_actions.squeeze(1).argmax(dim=1)
                     y_p_cpu = y_p.to("cpu")
                     if neutral is not None:
-                        z = torch.where(torch.abs(yield_batch) < neutral)
+                        z = torch.where(torch.abs(return_batch) < neutral)
                     else:
-                        z = torch.where(yield_batch == 0)
-                    y_t = torch.where(yield_batch > 0, 1, -1)
+                        z = torch.where(return_batch == 0)
+                    y_t = torch.where(return_batch > 0, 1, -1)
                     y_t[z] = 0
                     y_true.append(y_t)
                     y_pred.append(y_p_cpu)
@@ -389,10 +389,10 @@ class Model:
         y_pred = list()
         
         with tqdm(total=len(dataloader.dataset), desc=f"Training Epoch {epoch+1}/{epochs} - {year}", ncols=100, leave=False) as pbar:
-            for imgs_batch, yield_batch in dataloader:
+            for imgs_batch, return_batch in dataloader:
                 # imgs_batch = imgs_batch.to(self.device)
-                # yield_batch = yield_batch.to(self.device)
-                
+                # return_batch = return_batch.to(self.device)
+
                 pre_states_cpu = imgs_batch[:, 0, :, :, :]
                 cur_states_cpu = imgs_batch[:, 1, :, :, :]
                 next_states_cpu = imgs_batch[:, 2, :, :, :]
@@ -412,7 +412,7 @@ class Model:
                         cur_actions_cpu = cur_actions_gpu.to("cpu")
                         del cur_states_gpu, cur_actions_gpu, rho
 
-                cur_rewards = self._get_reward_neutral(pre_actions_cpu, cur_actions_cpu, yield_batch, transaction_penalty, scale=scale, cap=cap, neutral=neutral)
+                cur_rewards = self._get_reward_neutral(pre_actions_cpu, cur_actions_cpu, return_batch, transaction_penalty, scale=scale, cap=cap, neutral=neutral)
 
 
                 for i in range(imgs_batch.shape[0]):
@@ -421,7 +421,7 @@ class Model:
                         cur_actions_cpu[i].unsqueeze(0),
                         cur_rewards[i],
                         next_states_cpu[i].squeeze(0),
-                        yield_batch[i]
+                        return_batch[i]
                     )
                 if epsilon > epsilon_min:
                     epsilon *= 0.999999
@@ -439,6 +439,7 @@ class Model:
                 q_values_all, a = self.model(states)
                 q_values = torch.sum(q_values_all * actions, dim=1)
                 del a
+                
                 with torch.no_grad():
                     next_q_values, a = self.target_model(next_states)
                     next_q_max = next_q_values.max(dim=1)[0]
@@ -496,11 +497,11 @@ class Model:
         linear_slope = torch.tensor(0.1)
         neutral = torch.tensor(0.5)
         
-        # train_dataset = Dataset2(self.train_df_cache, start_date=train_s, end_date=train_e, data_dir=imgs_dir, transform=transform)
-        # train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)
-        years = range(int(train_s.split("-")[0]), int(train_e.split("-")[0]) + 1)
-        train_dataset = {year: Dataset2(self.train_df_cache, start_date=f"{year}-01-01", end_date=f"{year}-12-31", data_dir=imgs_dir, transform=transform) for year in years}
-        train_dataloader = {year: torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True) for year, dataset in train_dataset.items()}
+        train_dataset = Dataset2(self.train_df_cache, start_date=train_s, end_date=train_e, data_dir=imgs_dir, transform=transform)
+        train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True)
+        # years = range(int(train_s.split("-")[0]), int(train_e.split("-")[0]) + 1)
+        # train_dataset = {year: Dataset2(self.train_df_cache, start_date=f"{year}-01-01", end_date=f"{year}-12-31", data_dir=imgs_dir, transform=transform) for year in years}
+        # train_dataloader = {year: torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True) for year, dataset in train_dataset.items()}
         
         val_dataset_1 = Dataset2(self.train_df_cache, start_date=val_s, end_date=val_e, data_dir=imgs_dir, transform=transform) # train data와 같은 종목의 학습 시기 이후
         val_dataset_2 = Dataset2(self.val_df_cache, start_date=train_s, end_date=train_e, data_dir=imgs_dir, transform=transform) # train data와 다른 종목의 같은 시기
@@ -511,15 +512,15 @@ class Model:
             setproctitle(f"S&P500 Epoch {epoch + 1}/{epochs}, Epsilon: {epsilon:.4f}")
             
             try:
-                # train_loss, y_true, y_pred, epsilon = self._train(train_dataset, train_dataloader, optimizer, criterion, epoch, epochs, epsilon, epsilon_min, num_actions, batch_size, transaction_penalty, gamma, scale, cap, neutral, device)
-                train_loss = list()
-                y_true = list()
-                y_pred = list()
-                for year in years:
-                    t_loss, y_t, y_p, epsilon = self._train(train_dataset[year], train_dataloader[year], year, optimizer, criterion, epoch, epochs, epsilon, epsilon_min, num_actions, batch_size, transaction_penalty, gamma, scale, cap, neutral)
-                    train_loss.append(t_loss)
-                    y_true.extend(y_t)
-                    y_pred.extend(y_p)
+                train_loss, y_true, y_pred, epsilon = self._train(train_dataset, train_dataloader, "2015~2021", optimizer, criterion, epoch, epochs, epsilon, epsilon_min, num_actions, batch_size, transaction_penalty, gamma, scale, cap, neutral)
+                # train_loss = list()
+                # y_true = list()
+                # y_pred = list()
+                # for year in years:
+                #     t_loss, y_t, y_p, epsilon = self._train(train_dataset[year], train_dataloader[year], year, optimizer, criterion, epoch, epochs, epsilon, epsilon_min, num_actions, batch_size, transaction_penalty, gamma, scale, cap, neutral)
+                #     train_loss.append(t_loss)
+                #     y_true.extend(y_t)
+                #     y_pred.extend(y_p)
 
                 if scheduler.get_last_lr()[0] > 1e-6:
                     scheduler.step()
@@ -716,38 +717,38 @@ class Model:
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)
         
         y_true = list()
-        y_yield = list()
+        y_return = list()
         y_pred = list()
         q_values = list()
                 
         with tqdm(total=len(dataloader.dataset), desc=f"Testing", ncols=100, leave=False) as pbar:
             with torch.no_grad():
-                for imgs_batch, yield_batch in dataloader:
+                for imgs_batch, return_batch in dataloader:
                     imgs_batch = imgs_batch.to(self.device)
-                    yield_batch = yield_batch.to(self.device)
+                    return_batch = return_batch.to(self.device)
 
                     cur_states = imgs_batch[:, 1, :, :, :]
                     q, cur_actions = self.test_model(cur_states)
                     y_p = 1 - cur_actions.argmax(dim=1)
                     if neutral is not None:
-                        y_z = torch.where(torch.abs(yield_batch) < neutral)
+                        y_z = torch.where(torch.abs(return_batch) < neutral)
                     else:
-                        y_z = torch.where(yield_batch == 0)
-                    y_t = torch.where(yield_batch > 0, 1, -1)
+                        y_z = torch.where(return_batch == 0)
+                    y_t = torch.where(return_batch > 0, 1, -1)
                     y_t[y_z] = 0
                     y_true.append(y_t.cpu())
-                    y_yield.append(yield_batch.cpu())
+                    y_return.append(return_batch.cpu())
                     y_pred.append(y_p.cpu())
                     q_values.append(q.cpu())
                                         
                     pbar.update(imgs_batch.shape[0])
-                    
-                    del imgs_batch, yield_batch, cur_states, q, cur_actions, y_p, y_t
+
+                    del imgs_batch, return_batch, cur_states, q, cur_actions, y_p, y_t
 
         y_pred = torch.cat(y_pred)
         y_true = torch.cat(y_true)
-        y_yield = torch.cat(y_yield)
+        y_return = torch.cat(y_return)
         q_values = torch.cat(q_values)
 
         print(f"Test Distribution | Accuracy: {accuracy_score(y_true, y_pred):.4f}" )
-        return y_pred, y_true, y_yield, q_values
+        return y_pred, y_true, y_return, q_values
